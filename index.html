@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>TGC Fahrzeugeingang – Live VIN Scanner v4</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{
+  --bg:#0f1115; --card:#181c23; --text:#f4f6f8; --muted:#a9b0ba; --accent:#2f80ed;
+  --ok:#1fa971; --warn:#e24b4b; --line:#2a3039; --scan:#2ed573;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+.app{max-width:560px;margin:0 auto;min-height:100vh;padding:18px 16px 40px}
+.logo{font-weight:800;font-size:24px;margin-bottom:2px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px}
+h2{font-size:20px;margin:0 0 10px}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+input, textarea, select{width:100%;background:#11151b;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:16px;outline:none}
+textarea{min-height:90px}
+.btn{width:100%;border:0;border-radius:14px;padding:15px 16px;font-size:17px;font-weight:700;cursor:pointer;margin-top:10px}
+.primary{background:var(--accent);color:#fff}
+.secondary{background:#242a33;color:#fff}
+.ok{background:var(--ok);color:#fff}
+.danger{background:var(--warn);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hidden{display:none}
+.progress{display:flex;gap:6px;margin:4px 0 16px}
+.dot{height:6px;flex:1;border-radius:10px;background:#2a3039}
+.dot.active{background:var(--accent)}
+.small{font-size:12px;color:var(--muted);line-height:1.45}
+.status{margin-top:10px;padding:11px 12px;border-radius:12px;background:#11151b;border:1px solid var(--line);font-size:13px;line-height:1.4}
+.status.good{border-color:var(--ok);color:#b9f5dc}
+.status.bad{border-color:var(--warn);color:#ffc2c2}
+.preview{display:none;width:100%;max-height:260px;object-fit:contain;background:#0a0d11;border-radius:12px;margin-top:10px;border:1px solid var(--line)}
+.photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.photo-tile{background:#11151b;border:1px dashed #3b4350;border-radius:14px;padding:10px;text-align:center}
+.photo-tile input{padding:8px;font-size:13px}
+.thumb{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;margin-top:8px;display:none}
+.badge{display:inline-block;padding:7px 10px;border-radius:999px;font-size:12px;background:#242a33;color:#d7dbe1;margin-bottom:8px}
+.summary{font-size:14px;line-height:1.5}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+.topnav{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.back{background:none;color:#cfd5dd;border:0;font-size:15px;padding:8px 0}
+.vin-box{margin-top:10px;padding:13px;border-radius:12px;border:1px solid rgba(31,169,113,.6);background:rgba(31,169,113,.12);font-weight:800;letter-spacing:.8px}
+.helper{font-size:12px;color:#9fb3c8;margin-top:8px}
+.scanner{position:relative;margin-top:12px;border-radius:16px;overflow:hidden;background:#050607;border:1px solid #333b46}
+.scanner video{width:100%;display:block;aspect-ratio:3/4;object-fit:cover;background:#000}
+.scan-box{position:absolute;left:8%;right:8%;top:33%;height:20%;border:2px solid var(--scan);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.42);pointer-events:none}
+.scan-line{position:absolute;left:9%;right:9%;top:43%;height:2px;background:var(--scan);box-shadow:0 0 12px var(--scan);pointer-events:none}
+.scan-text{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(0,0,0,.7);padding:8px 10px;border-radius:10px;font-size:12px;text-align:center}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+canvas{display:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="logo">TGC Fahrzeugeingang</div>
+  <div class="sub">Smartphone-Test · Live VIN Scanner v4</div>
+  <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
+
+  <section id="step1" class="card">
+    <span class="badge">Schritt 1 von 4</span>
+    <h2>FIN live scannen</h2>
+    <div class="small">Kamera starten → FIN ins grüne Feld halten → das System scannt laufend und übernimmt die VIN automatisch.</div>
+    <div class="controls">
+      <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
+      <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
+    </div>
+    <div id="scannerWrap" class="scanner hidden">
+      <video id="video" playsinline autoplay muted></video>
+      <div class="scan-box"></div><div class="scan-line"></div>
+      <div class="scan-text">FIN möglichst gerade und nah in das grüne Feld halten</div>
+    </div>
+    <div id="status" class="status">Scanner noch nicht gestartet.</div>
+    <div id="detected" class="vin-box hidden"></div>
+    <label>Fallback: VIN-Foto aufnehmen</label>
+    <input id="vinPhoto" type="file" accept="image/*" capture="environment">
+    <img id="vinPreview" class="preview" alt="VIN Foto Vorschau">
+    <label>VIN / FIN</label>
+    <input id="vin" maxlength="17" placeholder="wird automatisch ausgefüllt" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    <div class="helper">Wenn ein Zeichen minimal falsch ist, kannst du die VIN hier kurz korrigieren.</div>
+    <label>Kennzeichen (optional)</label><input id="plate" placeholder="z. B. WI-UC1291">
+    <label>Spediteur / Fahrer (optional)</label><input id="carrier" placeholder="z. B. Muster Spedition">
+    <button id="next1" class="btn primary" type="button" disabled>Weiter zu Fotos</button>
+    <canvas id="ocrCanvas"></canvas>
+  </section>
+
+  <section id="step2" class="card hidden">
+    <div class="topnav"><button class="back" type="button" onclick="go(1)">← Zurück</button><span class="badge">Schritt 2 von 4</span></div>
+    <h2>Eingangsfotos</h2>
+    <div class="photo-grid">
+      <div class="photo-tile">Vorne<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img1')"><img id="img1" class="thumb"></div>
+      <div class="photo-tile">Hinten<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img2')"><img id="img2" class="thumb"></div>
+      <div class="photo-tile">Fahrerseite<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img3')"><img id="img3" class="thumb"></div>
+      <div class="photo-tile">Beifahrerseite<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img4')"><img id="img4" class="thumb"></div>
+      <div class="photo-tile">Innenraum<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img5')"><img id="img5" class="thumb"></div>
+      <div class="photo-tile">Tacho<input type="file" accept="image/*" capture="environment" onchange="preview(this,'img6')"><img id="img6" class="thumb"></div>
+    </div>
+    <button class="btn primary" type="button" onclick="go(3)">Weiter zur Schadenprüfung</button>
+  </section>
+
+  <section id="step3" class="card hidden">
+    <div class="topnav"><button class="back" type="button" onclick="go(2)">← Zurück</button><span class="badge">Schritt 3 von 4</span></div>
+    <h2>Schaden vorhanden?</h2>
+    <div class="row"><button class="btn ok" type="button" onclick="damage(false)">Nein</button><button class="btn danger" type="button" onclick="damage(true)">Ja</button></div>
+    <div id="damageBox" class="hidden">
+      <label>Schadenart</label>
+      <select id="damageType"><option>Kratzer</option><option>Delle</option><option>Lackschaden</option><option>Felgenschaden</option><option>Glasschaden</option><option>Innenraumschaden</option><option>Sonstiges</option></select>
+      <label>Schadenfoto</label><input type="file" accept="image/*" capture="environment" onchange="preview(this,'damageImg')"><img id="damageImg" class="thumb">
+      <label>Bemerkung</label><textarea id="note" placeholder="z. B. Kratzer Stoßfänger hinten rechts"></textarea>
+      <button class="btn primary" type="button" onclick="go(4)">Schaden übernehmen</button>
+    </div>
+  </section>
+
+  <section id="step4" class="card hidden">
+    <div class="topnav"><button class="back" type="button" onclick="go(3)">← Zurück</button><span class="badge">Schritt 4 von 4</span></div>
+    <h2>Eingang abschließen</h2><div id="summary" class="summary"></div>
+    <button class="btn ok" type="button" onclick="finish()">Fahrzeugeingang abschließen</button>
+  </section>
+
+  <section id="done" class="card hidden">
+    <span class="badge">Abgeschlossen</span><h2>✅ Fahrzeug erfasst</h2><div id="finalSummary" class="summary"></div>
+    <button class="btn secondary" type="button" onclick="resetAll()">Nächstes Fahrzeug</button>
+  </section>
+</div>
+<script>
+let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0;
+const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas');
+const translit={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
+const weights=[8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+function normalizeVIN(text){return(text||'').toUpperCase().replace(/[IOQ]/g,'').replace(/[^A-HJ-NPR-Z0-9]/g,'')}
+function transliterate(ch){if(/[0-9]/.test(ch))return parseInt(ch,10);return translit[ch]??null}
+function vinCheckValid(vin){vin=normalizeVIN(vin);if(vin.length!==17)return false;let sum=0;for(let i=0;i<17;i++){const v=transliterate(vin[i]);if(v===null)return false;sum+=v*weights[i]}const remainder=sum%11;const check=remainder===10?'X':String(remainder);return vin[8]===check}
+function setStatus(text,type=''){statusBox.className='status'+(type?' '+type:'');statusBox.textContent=text}
+function validateVIN(){const v=normalizeVIN(vinInput.value).slice(0,17);vinInput.value=v;nextBtn.disabled=v.length!==17;return v.length===17}
+vinInput.addEventListener('input',validateVIN);nextBtn.addEventListener('click',()=>go(2));
+async function getWorker(){if(worker)return worker;if(typeof Tesseract==='undefined')throw new Error('OCR-Bibliothek nicht geladen.');setStatus('Texterkennung wird vorbereitet …');worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'&&scanning)setStatus('Live-Scan läuft … '+Math.round(m.progress*100)+'%')}});await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',preserve_interword_spaces:'1'});return worker}
+function candidateScore(vin){let score=0;if(vin.length===17)score+=100;if(vinCheckValid(vin))score+=500;if(/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))score+=30;if(/^[A-Z]{3}/.test(vin))score+=20;if(/(.)\1{4,}/.test(vin))score-=120;if(/[A-Z]{10,}/.test(vin))score-=40;if(/^WBS/.test(vin))score+=40;if(/^WBA/.test(vin))score+=30;if(/^WVW|^WAU|^VF1|^W0L|^ZFA/.test(vin))score+=20;return score}
+function extractCandidates(text){const set=new Set(),up=(text||'').toUpperCase(),lines=up.split(/\r?\n/);for(const line of lines){const compact=normalizeVIN(line);if(compact.length>=17){for(let i=0;i<=compact.length-17;i++)set.add(compact.slice(i,i+17))}}const all=normalizeVIN(up);if(all.length>=17){for(let i=0;i<=all.length-17;i++)set.add(all.slice(i,i+17))}return Array.from(set).map(v=>({vin:v,valid:vinCheckValid(v),score:candidateScore(v)})).sort((a,b)=>b.score-a.score)}
+function acceptVIN(vin,safe=false){vinInput.value=vin;validateVIN();detectedBox.textContent=(safe?'✅ Sichere VIN erkannt: ':'✅ VIN erkannt: ')+vin;detectedBox.classList.remove('hidden');setStatus(safe?'VIN live erkannt und bestätigt.':'VIN live erkannt. Bitte kurz prüfen.','good');if(navigator.vibrate)navigator.vibrate([80,50,80]);stopScanner()}
+async function runOCRonBlob(blob){const w=await getWorker(),result=await w.recognize(blob),text=result&&result.data?result.data.text:'';return extractCandidates(text)}
+async function scanFrame(){if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();ocrBusy=true;try{const ctx=canvas.getContext('2d',{willReadFrequently:true}),sx=Math.floor(video.videoWidth*.08),sy=Math.floor(video.videoHeight*.33),sw=Math.floor(video.videoWidth*.84),sh=Math.floor(video.videoHeight*.20);canvas.width=Math.min(1400,sw);canvas.height=Math.round(canvas.width*(sh/sw));ctx.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;for(let i=0;i<d.length;i+=4){const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2],v=gray>145?255:0;d[i]=d[i+1]=d[i+2]=v}ctx.putImageData(img,0,0);const blob=await new Promise(res=>canvas.toBlob(res,'image/jpeg',.92)),cands=await runOCRonBlob(blob);if(cands.length){const best=cands.find(c=>c.valid)||cands[0];if(best.vin===stableCandidate)stableCount+=1;else{stableCandidate=best.vin;stableCount=1}setStatus('Kandidat erkannt: '+best.vin+' ('+stableCount+'x)',best.valid?'good':'');if(best.valid&&stableCount>=2){acceptVIN(best.vin,true);return}if(!best.valid&&stableCount>=3){acceptVIN(best.vin,false);return}}else{stableCandidate='';stableCount=0;setStatus('Noch keine VIN erkannt – bitte näher ran und möglichst gerade halten.')}}catch(err){setStatus('Live-Scan konnte nicht auswerten. Bitte Foto-Fallback nutzen oder Seite neu öffnen.','bad')}finally{ocrBusy=false;scheduleNextScan()}}
+function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,1200)}
+async function startScanner(){try{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){setStatus('Dein Browser unterstützt keine Live-Kamera. Bitte den Foto-Fallback nutzen.','bad');return}stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;await video.play();scannerWrap.classList.remove('hidden');scanning=true;stableCandidate='';stableCount=0;setStatus('Kamera aktiv – FIN ins grüne Feld halten.');scheduleNextScan()}catch(err){setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben. Falls das nicht geht, unten den Foto-Fallback nutzen.','bad')}}
+function stopScanner(){scanning=false;if(scanTimer)clearTimeout(scanTimer);scanTimer=null;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;scannerWrap.classList.add('hidden');if(!validateVIN())setStatus('Scanner gestoppt.')}
+document.getElementById('startBtn').addEventListener('click',startScanner);document.getElementById('stopBtn').addEventListener('click',stopScanner);
+document.getElementById('vinPhoto').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;const preview=document.getElementById('vinPreview');preview.src=URL.createObjectURL(file);preview.style.display='block';setStatus('Foto übernommen. VIN-Erkennung startet …');try{const cands=await runOCRonBlob(file);if(!cands.length){setStatus('Keine sichere VIN im Foto erkannt. Bitte manuell eintragen.','bad');return}const best=cands.find(c=>c.valid)||cands[0];acceptVIN(best.vin,best.valid)}catch(err){setStatus('Foto-Erkennung fehlgeschlagen. Bitte manuell eingeben.','bad')}});
+function setProgress(n){for(let i=1;i<=4;i++)document.getElementById('p'+i).classList.toggle('active',i<=n)}
+function go(n){if(n===2&&!validateVIN()){alert('Bitte zuerst eine vollständige VIN erfassen.');return}stopScanner();['step1','step2','step3','step4','done'].forEach(id=>document.getElementById(id).classList.add('hidden'));document.getElementById('step'+n).classList.remove('hidden');setProgress(n);if(n===4)buildSummary();window.scrollTo({top:0,behavior:'smooth'})}
+function preview(input,id){const img=document.getElementById(id);if(input.files&&input.files[0]){img.src=URL.createObjectURL(input.files[0]);img.style.display='block'}}
+function damage(v){hasDamage=v;const box=document.getElementById('damageBox');if(v)box.classList.remove('hidden');else{box.classList.add('hidden');go(4)}}
+function vals(){return{vin:vinInput.value.trim().toUpperCase(),plate:document.getElementById('plate').value.trim().toUpperCase(),carrier:document.getElementById('carrier').value.trim(),hasDamage:hasDamage===true?'Ja':'Nein',damageType:hasDamage===true?document.getElementById('damageType').value:'-',note:hasDamage===true?document.getElementById('note').value.trim():'-',time:new Date().toLocaleString('de-DE')}}
+function buildSummary(){const v=vals();document.getElementById('summary').innerHTML='<div class="kv"><b>VIN</b><span>'+v.vin+'</span></div><div class="kv"><b>Kennzeichen</b><span>'+(v.plate||'-')+'</span></div><div class="kv"><b>Spediteur</b><span>'+(v.carrier||'-')+'</span></div><div class="kv"><b>Schaden</b><span>'+v.hasDamage+'</span></div><div class="kv"><b>Schadenart</b><span>'+v.damageType+'</span></div><div class="kv"><b>Bemerkung</b><span>'+v.note+'</span></div>'}
+function finish(){const v=vals();document.getElementById('step4').classList.add('hidden');document.getElementById('done').classList.remove('hidden');document.getElementById('finalSummary').innerHTML=document.getElementById('summary').innerHTML+'<div class="kv"><b>Zeit</b><span>'+v.time+'</span></div>'}
+function resetAll(){stopScanner();location.reload()}window.addEventListener('pagehide',stopScanner);
+</script>
+</body>
+</html>
