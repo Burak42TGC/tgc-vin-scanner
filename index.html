@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>TGC Fahrzeugeingang – Live VIN Scanner v6</title>
+<title>TGC Fahrzeugeingang – Live VIN Scanner v7</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
 :root{
   --bg:#0f1115; --card:#181c23; --text:#f4f6f8; --muted:#a9b0ba; --accent:#2f80ed;
@@ -59,13 +60,13 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · Live VIN Scanner v6 · QR + VIN OCR</div>
+  <div class="sub">Smartphone-Test · Live VIN Scanner v7 · iPhone QR + VIN OCR</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
     <span class="badge">Schritt 1 von 4</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → zuerst wird automatisch nach QR-/Barcodes gesucht. Falls kein Code gefunden wird, läuft parallel die VIN-OCR.</div>
+    <div class="small">Kamera starten → eigener QR-Scanner läuft direkt im Browser (auch auf iPhone/Safari). Falls kein QR gefunden wird, läuft die VIN-OCR als Fallback.</div>
     <div class="controls">
       <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
       <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
@@ -86,7 +87,7 @@ canvas{display:none}
     <label>Kennzeichen (optional)</label><input id="plate" placeholder="z. B. WI-UC1291">
     <label>Spediteur / Fahrer (optional)</label><input id="carrier" placeholder="z. B. Muster Spedition">
     <button id="next1" class="btn primary" type="button" disabled>Weiter zu Fotos</button>
-    <canvas id="ocrCanvas"></canvas>
+    <canvas id="ocrCanvas"></canvas><canvas id="qrCanvas"></canvas>
   </section>
 
   <section id="step2" class="card hidden">
@@ -128,8 +129,8 @@ canvas{display:none}
   </section>
 </div>
 <script>
-let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0,scanVariant=0,barcodeDetector=null;
-const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas');
+let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0,scanVariant=0;
+const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas'),qrCanvas=document.getElementById('qrCanvas');
 const translit={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
 const weights=[8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 function normalizeVIN(text){return(text||'').toUpperCase().replace(/[IOQ]/g,'').replace(/[^A-HJ-NPR-Z0-9]/g,'')}
@@ -147,28 +148,42 @@ function extractVinFromAnyText(text){
   }
   return null;
 }
-async function initBarcodeDetector(){
-  if(barcodeDetector!==null)return barcodeDetector;
-  if(!('BarcodeDetector' in window)){barcodeDetector=false;return false;}
+function tryQrFrame(){
+  if(typeof jsQR!=='function'||!video.videoWidth||!video.videoHeight)return null;
   try{
-    const formats=await BarcodeDetector.getSupportedFormats();
-    const wanted=['qr_code','data_matrix','code_128'].filter(x=>formats.includes(x));
-    barcodeDetector=new BarcodeDetector({formats:wanted.length?wanted:formats});
-    return barcodeDetector;
-  }catch(e){barcodeDetector=false;return false;}
-}
-async function tryBarcodeFrame(){
-  const detector=await initBarcodeDetector();
-  if(!detector||!video.videoWidth)return null;
-  try{
-    const hits=await detector.detect(video);
-    for(const hit of hits){
-      const raw=hit.rawValue||'';
-      const vin=extractVinFromAnyText(raw);
-      if(vin)return vin;
+    const ctx=qrCanvas.getContext('2d',{willReadFrequently:true});
+    const vw=video.videoWidth, vh=video.videoHeight;
+
+    // Use a wide central crop so VIN + Tesla QR can both be inside it.
+    const sx=Math.floor(vw*.03), sy=Math.floor(vh*.22);
+    const sw=Math.floor(vw*.94), sh=Math.floor(vh*.48);
+
+    const targetW=Math.min(1600,sw);
+    const targetH=Math.max(300,Math.round(targetW*(sh/sw)));
+    qrCanvas.width=targetW;
+    qrCanvas.height=targetH;
+
+    ctx.drawImage(video,sx,sy,sw,sh,0,0,targetW,targetH);
+    const img=ctx.getImageData(0,0,targetW,targetH);
+
+    const qr=jsQR(img.data,targetW,targetH,{inversionAttempts:'attemptBoth'});
+    if(!qr||!qr.data)return null;
+
+    const vin=extractVinFromAnyText(qr.data);
+    if(vin)return vin;
+
+    // Some labels may encode extra text around the VIN.
+    const compact=normalizeVIN(qr.data);
+    if(compact.length>=17){
+      for(let i=0;i<=compact.length-17;i++){
+        const part=compact.slice(i,i+17);
+        if(/^[A-HJ-NPR-Z0-9]{17}$/.test(part))return part;
+      }
     }
-  }catch(e){}
-  return null;
+    return null;
+  }catch(e){
+    return null;
+  }
 }
 function transliterate(ch){if(/[0-9]/.test(ch))return parseInt(ch,10);return translit[ch]??null}
 function vinCheckValid(vin){vin=normalizeVIN(vin);if(vin.length!==17)return false;let sum=0;for(let i=0;i<17;i++){const v=transliterate(vin[i]);if(v===null)return false;sum+=v*weights[i]}const remainder=sum%11;const check=remainder===10?'X':String(remainder);return vin[8]===check}
@@ -184,10 +199,10 @@ async function scanFrame(){
 if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();
 ocrBusy=true;
 try{
-  const barcodeVin=await tryBarcodeFrame();
-  if(barcodeVin){
-    setStatus('QR-/Barcode erkannt: '+barcodeVin,'good');
-    acceptVIN(barcodeVin,true);
+  const qrVin=tryQrFrame();
+  if(qrVin){
+    setStatus('QR erkannt: '+qrVin,'good');
+    acceptVIN(qrVin,true);
     return;
   }
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
@@ -224,7 +239,7 @@ try{
     if(stableCount>=3){acceptVIN(best.vin,false);return}
   }else{
     stableCount=Math.max(0,stableCount-1);
-    setStatus('Suche läuft … QR-Code und VIN möglichst gemeinsam sichtbar halten. OCR-Fallback aktiv.');
+    setStatus('Suche läuft … QR-Code und VIN möglichst gemeinsam sichtbar halten. iPhone-QR + OCR laufen parallel.');
   }
 }catch(err){
   setStatus('Live-Scan konnte das Bild nicht auswerten. Bitte kurz neu ausrichten.','bad')
@@ -259,7 +274,7 @@ try{
 
   scannerWrap.classList.remove('hidden');
   scanning=true;stableCandidate='';stableCount=0;scanVariant=0;
-  setStatus('Scanner aktiv – QR-/Barcode-Erkennung läuft zuerst, OCR parallel als Fallback.');
+  setStatus('Scanner aktiv – iPhone-QR-Erkennung läuft direkt im Browser, OCR als Fallback.');
   scheduleNextScan()
 }catch(err){
   setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad')
