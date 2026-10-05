@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>TGC Fahrzeugeingang – Live VIN Scanner v9</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>TGC Fahrzeugeingang – Live VIN Scanner v10</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
@@ -50,8 +53,8 @@ textarea{min-height:90px}
 .helper{font-size:12px;color:#9fb3c8;margin-top:8px}
 .scanner{position:relative;margin-top:12px;border-radius:16px;overflow:hidden;background:#050607;border:1px solid #333b46}
 .scanner video{width:100%;display:block;aspect-ratio:3/4;object-fit:cover;background:#000}
-.scan-box{position:absolute;left:6%;right:6%;top:37%;height:12%;border:2px solid var(--scan);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.42);pointer-events:none}
-.scan-line{position:absolute;left:7%;right:7%;top:43%;height:2px;background:var(--scan);box-shadow:0 0 12px var(--scan);pointer-events:none}
+.scan-box{position:absolute;left:5%;right:5%;top:39%;height:11%;border:2px solid var(--scan);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.42);pointer-events:none}
+.scan-line{position:absolute;left:6%;right:6%;top:44.5%;height:2px;background:var(--scan);box-shadow:0 0 12px var(--scan);pointer-events:none}
 .scan-text{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(0,0,0,.7);padding:8px 10px;border-radius:10px;font-size:12px;text-align:center}
 .controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 canvas{display:none}
@@ -60,13 +63,13 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · Live VIN Scanner v9 · VIN-Zeilenmodus</div>
+  <div class="sub">Smartphone-Test · Live VIN Scanner v10 · Exakter Scanrahmen</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
-    <span class="badge">Schritt 1 von 4</span>
+    <span class="badge">Schritt 1 von 4 · v10</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → nur die VIN-Zeile im grünen Rahmen wird ausgewertet. Die OCR ist auf eine einzelne 17-stellige Fahrzeugnummer optimiert.</div>
+    <div class="small">Kamera starten → nur die 17-stellige FIN exakt in den grünen Rahmen halten. Gelesen wird ausschließlich dieser sichtbare Bereich.</div>
     <div class="controls">
       <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
       <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
@@ -74,7 +77,7 @@ canvas{display:none}
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
-      <div class="scan-text">Nur die 17-stellige VIN in die grüne Zeile legen</div>
+      <div class="scan-text">Nur die komplette 17-stellige VIN in den grünen Rahmen legen</div>
     </div>
     <div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
@@ -193,98 +196,108 @@ vinInput.addEventListener('input',validateVIN);nextBtn.addEventListener('click',
 async function getWorker(){if(worker)return worker;if(typeof Tesseract==='undefined')throw new Error('OCR-Bibliothek nicht geladen.');setStatus('Texterkennung wird vorbereitet …');worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'&&scanning)setStatus('Live-Scan läuft … '+Math.round(m.progress*100)+'%')}});await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',preserve_interword_spaces:'0',tessedit_pageseg_mode:'7'});return worker}
 function candidateScore(vin){let score=0;if(vin.length===17)score+=100;if(vinCheckValid(vin))score+=500;if(/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))score+=30;if(/^[A-Z]{3}/.test(vin))score+=20;if(/(.)\1{4,}/.test(vin))score-=120;if(/[A-Z]{10,}/.test(vin))score-=40;if(/^WBS/.test(vin))score+=40;if(/^WBA/.test(vin))score+=30;if(/^WVW|^WAU|^VF1|^W0L|^ZFA/.test(vin))score+=20;return score}
 function extractCandidates(text){
-  const set=new Set();
-  const up=(text||'').toUpperCase();
+  const out=[];
+  const lines=(text||'').toUpperCase().split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
 
-  // Prefer individual OCR lines; never concatenate unrelated lines.
-  const lines=up.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
   for(const line of lines){
-    const raw=line.replace(/[^A-Z0-9]/g,'');
-    // VINs never contain I, O or Q.
-    const cleaned=raw.replace(/[IOQ]/g,'');
-    if(cleaned.length===17 && /^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned)){
-      set.add(cleaned);
-    }else if(cleaned.length>17){
-      for(let i=0;i<=cleaned.length-17;i++){
-        const part=cleaned.slice(i,i+17);
-        if(/^[A-HJ-NPR-Z0-9]{17}$/.test(part)) set.add(part);
-      }
-    }
-  }
+    const cleaned=line
+      .replace(/[^A-Z0-9]/g,'')
+      .replace(/[IOQ]/g,'');
 
-  return Array.from(set).map(v=>({
-    vin:v,
-    valid:true,
-    score:100
-  }));
+    // Reject contaminated lines completely. Never cut a 17-char window out of longer text.
+    if(cleaned.length!==17) continue;
+    if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned)) continue;
+
+    out.push({vin:cleaned,valid:true,score:100});
+  }
+  return out;
 }
 function acceptVIN(vin,safe=false){vinInput.value=vin;validateVIN();detectedBox.textContent=(safe?'✅ Sichere VIN erkannt: ':'✅ VIN erkannt: ')+vin;detectedBox.classList.remove('hidden');setStatus(safe?'VIN live erkannt und bestätigt.':'VIN live erkannt. Bitte kurz prüfen.','good');if(navigator.vibrate)navigator.vibrate([80,50,80]);stopScanner()}
 async function runOCRonBlob(blob){const w=await getWorker(),result=await w.recognize(blob),text=result&&result.data?result.data.text:'';return extractCandidates(text)}
 async function scanFrame(){
-if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();
+if(!scanning||ocrBusy||!video.videoWidth||!video.videoHeight)return scheduleNextScan();
 ocrBusy=true;
 try{
-  const vw=video.videoWidth, vh=video.videoHeight;
+  const overlay=document.querySelector('.scan-box');
+  const vr=video.getBoundingClientRect();
+  const or=overlay.getBoundingClientRect();
 
-  // Crop only the same narrow horizontal band shown by the green guide.
-  const sx=Math.floor(vw*.05);
-  const sy=Math.floor(vh*.39);
-  const sw=Math.floor(vw*.90);
-  const sh=Math.floor(vh*.12);
+  const srcW=video.videoWidth, srcH=video.videoHeight;
+  const boxW=vr.width, boxH=vr.height;
+
+  // Map CSS object-fit: cover coordinates back to the real camera frame.
+  const scale=Math.max(boxW/srcW, boxH/srcH);
+  const renderedW=srcW*scale;
+  const renderedH=srcH*scale;
+  const cropX=(renderedW-boxW)/2;
+  const cropY=(renderedH-boxH)/2;
+
+  let sx=((or.left-vr.left)+cropX)/scale;
+  let sy=((or.top-vr.top)+cropY)/scale;
+  let sw=or.width/scale;
+  let sh=or.height/scale;
+
+  sx=Math.max(0,Math.min(srcW-1,sx));
+  sy=Math.max(0,Math.min(srcH-1,sy));
+  sw=Math.max(1,Math.min(srcW-sx,sw));
+  sh=Math.max(1,Math.min(srcH-sy,sh));
 
   const base=document.createElement('canvas');
   const bctx=base.getContext('2d',{willReadFrequently:true});
-  base.width=Math.min(1800,Math.max(1400,sw));
-  base.height=Math.max(180,Math.round(base.width*(sh/sw)));
+
+  // Upscale the exact visible scan band for OCR.
+  const targetW=1800;
+  base.width=targetW;
+  base.height=Math.max(180,Math.round(targetW*(sh/sw)));
   bctx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);
 
   const passes=[base];
 
-  // High-contrast grayscale pass.
+  // Contrast-enhanced pass.
   const contrast=document.createElement('canvas');
-  contrast.width=base.width; contrast.height=base.height;
-  const cctx=contrast.getContext('2d',{willReadFrequently:true});
-  cctx.drawImage(base,0,0);
-  let img=cctx.getImageData(0,0,contrast.width,contrast.height),d=img.data;
+  contrast.width=base.width;
+  contrast.height=base.height;
+  const ctx=contrast.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(base,0,0);
+  const img=ctx.getImageData(0,0,contrast.width,contrast.height);
+  const d=img.data;
   for(let i=0;i<d.length;i+=4){
     const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    const v=Math.max(0,Math.min(255,(g-128)*2.2+128));
+    const v=Math.max(0,Math.min(255,(g-128)*1.9+128));
     d[i]=d[i+1]=d[i+2]=v;
   }
-  cctx.putImageData(img,0,0);
+  ctx.putImageData(img,0,0);
   passes.push(contrast);
 
-  let found=[];
+  let candidate=null;
   for(const pass of passes){
     const blob=await new Promise(res=>pass.toBlob(res,'image/jpeg',.98));
-    const cands=await runOCRonBlob(blob);
-    if(cands.length){ found=cands; break; }
+    const result=await runOCRonBlob(blob);
+    if(result.length){ candidate=result[0].vin; break; }
   }
 
-  if(found.length){
-    const best=found[0];
-    if(best.vin===stableCandidate) stableCount+=1;
-    else { stableCandidate=best.vin; stableCount=1; }
+  if(candidate){
+    if(candidate===stableCandidate) stableCount++;
+    else { stableCandidate=candidate; stableCount=1; }
 
-    setStatus('VIN erkannt: '+best.vin+' · '+stableCount+'/2','good');
+    setStatus('VIN erkannt: '+candidate+' · Bestätigung '+stableCount+'/2','good');
 
-    // Two identical reads are enough. No mandatory US check-digit rule.
     if(stableCount>=2){
-      acceptVIN(best.vin,true);
+      acceptVIN(candidate,true);
       return;
     }
   }else{
     stableCandidate='';
     stableCount=0;
-    setStatus('Noch nichts erkannt – nur die VIN-Zeile in den grünen Rahmen legen.');
+    setStatus('Noch keine saubere 17-stellige VIN erkannt – VIN komplett im grünen Rahmen halten.');
   }
 }catch(err){
-  setStatus('Scannerfehler: '+(err&&err.message?err.message:'unbekannt'),'bad');
+  setStatus('Scannerfehler: '+(err?.message||'unbekannt'),'bad');
 }finally{
   ocrBusy=false;
   scheduleNextScan();
 }}
-function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,1100)}
+function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,900)}
 async function startScanner(){
 try{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
