@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>TGC Fahrzeugeingang – Live VIN Scanner v5</title>
+<title>TGC Fahrzeugeingang – Live VIN Scanner v6</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{
@@ -59,13 +59,13 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · Live VIN Scanner v5 · Scheibenmodus</div>
+  <div class="sub">Smartphone-Test · Live VIN Scanner v6 · QR + VIN OCR</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
     <span class="badge">Schritt 1 von 4</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Scheibenmodus: Kamera starten → FIN hinter der Frontscheibe möglichst formatfüllend ins grüne Feld halten. Der Scanner testet mehrere Kontrastvarianten automatisch.</div>
+    <div class="small">Kamera starten → zuerst wird automatisch nach QR-/Barcodes gesucht. Falls kein Code gefunden wird, läuft parallel die VIN-OCR.</div>
     <div class="controls">
       <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
       <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
@@ -73,7 +73,7 @@ canvas{display:none}
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
-      <div class="scan-text">Scheiben-VIN nah heranholen · Spiegelungen möglichst vermeiden</div>
+      <div class="scan-text">VIN + QR möglichst gemeinsam im grünen Bereich halten</div>
     </div>
     <div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
@@ -128,11 +128,48 @@ canvas{display:none}
   </section>
 </div>
 <script>
-let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0,scanVariant=0;
+let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0,scanVariant=0,barcodeDetector=null;
 const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas');
 const translit={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
 const weights=[8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 function normalizeVIN(text){return(text||'').toUpperCase().replace(/[IOQ]/g,'').replace(/[^A-HJ-NPR-Z0-9]/g,'')}
+function extractVinFromAnyText(text){
+  const up=(text||'').toUpperCase();
+  const direct=up.match(/[A-HJ-NPR-Z0-9]{17}/g);
+  if(direct&&direct.length)return direct[0];
+  const compact=normalizeVIN(up);
+  if(compact.length===17)return compact;
+  if(compact.length>17){
+    for(let i=0;i<=compact.length-17;i++){
+      const s=compact.slice(i,i+17);
+      if(/^[A-HJ-NPR-Z0-9]{17}$/.test(s))return s;
+    }
+  }
+  return null;
+}
+async function initBarcodeDetector(){
+  if(barcodeDetector!==null)return barcodeDetector;
+  if(!('BarcodeDetector' in window)){barcodeDetector=false;return false;}
+  try{
+    const formats=await BarcodeDetector.getSupportedFormats();
+    const wanted=['qr_code','data_matrix','code_128'].filter(x=>formats.includes(x));
+    barcodeDetector=new BarcodeDetector({formats:wanted.length?wanted:formats});
+    return barcodeDetector;
+  }catch(e){barcodeDetector=false;return false;}
+}
+async function tryBarcodeFrame(){
+  const detector=await initBarcodeDetector();
+  if(!detector||!video.videoWidth)return null;
+  try{
+    const hits=await detector.detect(video);
+    for(const hit of hits){
+      const raw=hit.rawValue||'';
+      const vin=extractVinFromAnyText(raw);
+      if(vin)return vin;
+    }
+  }catch(e){}
+  return null;
+}
 function transliterate(ch){if(/[0-9]/.test(ch))return parseInt(ch,10);return translit[ch]??null}
 function vinCheckValid(vin){vin=normalizeVIN(vin);if(vin.length!==17)return false;let sum=0;for(let i=0;i<17;i++){const v=transliterate(vin[i]);if(v===null)return false;sum+=v*weights[i]}const remainder=sum%11;const check=remainder===10?'X':String(remainder);return vin[8]===check}
 function setStatus(text,type=''){statusBox.className='status'+(type?' '+type:'');statusBox.textContent=text}
@@ -147,6 +184,12 @@ async function scanFrame(){
 if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();
 ocrBusy=true;
 try{
+  const barcodeVin=await tryBarcodeFrame();
+  if(barcodeVin){
+    setStatus('QR-/Barcode erkannt: '+barcodeVin,'good');
+    acceptVIN(barcodeVin,true);
+    return;
+  }
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   const sx=Math.floor(video.videoWidth*.05),sy=Math.floor(video.videoHeight*.35),sw=Math.floor(video.videoWidth*.90),sh=Math.floor(video.videoHeight*.18);
   canvas.width=Math.min(1800,Math.max(1200,sw));
@@ -181,7 +224,7 @@ try{
     if(stableCount>=3){acceptVIN(best.vin,false);return}
   }else{
     stableCount=Math.max(0,stableCount-1);
-    setStatus('Suche läuft … Handy etwas näher an die Scheibe, VIN komplett im grünen Feld halten.');
+    setStatus('Suche läuft … QR-Code und VIN möglichst gemeinsam sichtbar halten. OCR-Fallback aktiv.');
   }
 }catch(err){
   setStatus('Live-Scan konnte das Bild nicht auswerten. Bitte kurz neu ausrichten.','bad')
@@ -216,7 +259,7 @@ try{
 
   scannerWrap.classList.remove('hidden');
   scanning=true;stableCandidate='';stableCount=0;scanVariant=0;
-  setStatus('Scheibenmodus aktiv – VIN groß ins grüne Feld halten. Kamera fokussiert automatisch.');
+  setStatus('Scanner aktiv – QR-/Barcode-Erkennung läuft zuerst, OCR parallel als Fallback.');
   scheduleNextScan()
 }catch(err){
   setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad')
