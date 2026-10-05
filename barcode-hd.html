@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>TGC · Barcode-HD · v15</title>
+<style>
+:root{color-scheme:dark;--bg:#10141b;--panel:#1a212c;--ink:#f3f6fc;--muted:#bac6d9;--border:#37445a;--blue:#327eee;--green:#51df9c;--amber:#ffcf7e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Arial,sans-serif}.app{max-width:840px;margin:auto;padding:18px 16px max(30px,env(safe-area-inset-bottom))}header{display:flex;align-items:center;justify-content:space-between;gap:16px}header strong{font-size:21px}header span{padding:5px 10px;background:#23304a;border-radius:30px;font-size:13px}h1{font-size:25px;margin:20px 0 5px}p{margin:6px 0 14px}.muted,small{color:var(--muted)}.row{display:flex;gap:10px}button{min-height:50px;padding:12px 16px;border:1px solid var(--border);border-radius:13px;color:var(--ink);background:var(--panel);font:600 16px/1.3 system-ui;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}.row button{flex:1}button.primary{background:var(--blue);border-color:var(--blue)}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--amber);outline-offset:3px}[hidden]{display:none!important}.view{position:relative;width:100%;aspect-ratio:4/3;max-height:65svh;overflow:hidden;border-radius:17px;background:#000;margin-top:14px;border:1px solid var(--border)}video{width:100%;height:100%;display:block;object-fit:cover;object-position:center}.guide{position:absolute;left:3%;right:3%;top:31%;height:34%;border:3px solid var(--green);border-radius:12px;box-shadow:0 0 0 999px #0005;pointer-events:none}.viewtext{position:absolute;left:10px;right:10px;bottom:9px;padding:7px 10px;background:#000b;border-radius:10px;font-size:12px;text-align:center;pointer-events:none}.stat{padding:12px 14px;border:1px solid var(--border);border-radius:13px;background:var(--panel);margin:12px 0;overflow-wrap:anywhere}.stat.good{border-color:var(--green)}.stat.bad{border-color:var(--amber)}#metrics{font-size:12px;color:var(--muted);min-height:18px;margin:6px 0 10px}.result{border:1px solid var(--green);border-radius:15px;padding:16px;margin-top:16px;background:#172c25}.result label{display:block;font-size:13px}input[type=text],select{width:100%;font:17px system-ui;background:#101721;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:12px;margin:7px 0 12px}#vin{font:600 clamp(15px,4.5vw,22px) ui-monospace,monospace;letter-spacing:.02em}.result p{font-size:14px}details{margin-top:18px;border-top:1px solid var(--border);padding-top:12px}summary{cursor:pointer;color:var(--muted);padding:6px 0}details label{display:block;margin-top:12px}.file{width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;margin:8px 0}#cropPreview{width:100%;height:auto;border:1px solid var(--border);border-radius:8px;background:#111}#zoom{width:100%}footer{font-size:12px;color:var(--muted);margin-top:22px}footer p{margin:4px 0}@media (orientation:landscape){.view{aspect-ratio:16/9}.app{padding-top:10px}h1{margin-top:10px}}
+</style>
+</head><body><main class="app">
+<header><strong>TGC Fahrzeugeingang</strong><span>Barcode-HD · v15</span></header>
+<h1>TGC-Barcode live lesen</h1>
+<p class="muted">Einmal starten. Den <strong>gesamten Strichcode samt weißem Rand</strong> ins grüne Feld halten. Kein Foto-Auslöser nötig.</p>
+<div class="row"><button id="startBtn" class="primary">Kamera starten</button><button id="stopBtn" disabled>Stoppen</button></div>
+<div id="camera" class="view" hidden><video id="video" playsinline muted autoplay></video><div id="guide" class="guide"></div><div class="viewtext">Alle Balken sichtbar lassen · ruhig halten</div></div>
+<div id="status" class="stat" role="status" aria-live="polite">Bereit · für TGC-Strichcodes im Format Code 39.</div>
+<div id="metrics">Die tatsächliche Kameraauflösung wird nach dem Start angezeigt.</div>
+<section id="result" class="result" hidden><label for="vin">Aus dem Barcode gelesen</label><input id="vin" type="text" maxlength="17" readonly><p id="resultInfo"></p><p>Bitte die VIN vor Verwendung mit dem Ausdruck vergleichen.</p><div class="row"><button id="copyBtn">VIN kopieren</button><button id="againBtn" class="primary">Nächsten Code scannen</button></div></section>
+<details id="options"><summary>Bei Unschärfe: Kamera / Zoom</summary><label for="cameraSelect">Verfügbare Kameras</label><select id="cameraSelect"><option value="">Automatisch: Rückkamera</option></select><button id="switchBtn" disabled>Gewählte Kamera verwenden</button><p class="muted"><small>Die Kameraliste erscheint nach der Freigabe. Verfügbare Einstellungen hängen vom Gerät ab.</small></p><div id="zoomBox" hidden><label for="zoom">Kamera-Zoom <output id="zoomValue"></output></label><input id="zoom" type="range"></div></details>
+<details id="diagnostic"><summary>Testfoto und Diagnose (optional)</summary><p class="muted"><small>Ein vorhandenes Foto wird nur auf diesem Gerät geprüft. Der Live-Scanner oben benötigt kein Foto.</small></p><label for="photoFile">Vorhandenes Barcode-Foto</label><input class="file" id="photoFile" type="file" accept="image/*"><p id="debugText" class="muted"></p><canvas id="cropPreview" hidden></canvas></details>
+<footer><p>Lokale Testversion · kein API-Schlüssel, keine kostenpflichtige Scan-API.</p><p>Keine Fotos werden hochgeladen. Kein Speichern im TGC-System. Nur Code 39, kein QR-/OCR-Modus.</p></footer>
+</main>
+<script>
+/* Code 39 standard symbol patterns; no OCR and no VIN value guesses.
+   Table reference: ZXing Code39Reader (Apache-2.0). Decoder implementation below is original. */
+(function(root){
+'use strict';
+const letters='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*';
+const patterns=[0x034,0x121,0x061,0x160,0x031,0x130,0x070,0x025,0x124,0x064,0x109,0x049,0x148,0x019,0x118,0x058,0x00D,0x10C,0x04C,0x01C,0x103,0x043,0x142,0x013,0x112,0x052,0x007,0x106,0x046,0x016,0x181,0x0C1,0x1C0,0x091,0x190,0x0D0,0x085,0x184,0x0C4,0x0A8,0x0A2,0x08A,0x02A,0x094];
+const table=new Map(patterns.map((v,i)=>[v,letters[i]]));
+function symbol(r,j){
+  const a=r.slice(j,j+9);if(a.length!==9)return null;
+  const sorted=a.slice().sort((x,y)=>x-y),n=(sorted[0]+sorted[1]+sorted[2]+sorted[3]+sorted[4]+sorted[5])/6;
+  const w=(sorted[6]+sorted[7]+sorted[8])/3;
+  if(n<.45||w/n<1.45||w/n>4.5||sorted[6]/Math.max(.001,sorted[5])<1.12||sorted[8]>w*1.55)return null;
+  const cut=(sorted[5]+sorted[6])/2;let p=0;
+  for(let k=0;k<9;k++)if(a[k]>cut)p|=1<<(8-k);
+  const ch=table.get(p);return ch?{ch,n,w}:null;
+}
+function lineDecode(gray,threshold){
+  const widths=[],colors=[];let color=gray[0]<threshold,start=0;
+  for(let i=1;i<gray.length;i++){
+    const c=gray[i]<threshold;
+    if(c!==color){
+      const edge=i-1+(threshold-gray[i-1])/(gray[i]-gray[i-1]);
+      widths.push(edge-start);colors.push(color);start=edge;color=c;
+    }
+  }
+  widths.push(gray.length-start);colors.push(color);
+  for(let j=1;j+9<widths.length;j++){
+    if(!colors[j])continue;
+    const first=symbol(widths,j);
+    if(!first||first.ch!=='*'||widths[j-1]<first.n*4)continue;
+    let text='',valid=true;
+    for(let k=j+10;k+9<=widths.length&&text.length<=64;k+=10){
+      const s=symbol(widths,k);
+      if(!s||widths[k-1]<.25*s.n||widths[k-1]>s.w*2.5){valid=false;break;}
+      if(s.ch==='*'){
+        if(text.length&&widths[k+9]>=s.n*4)return text;
+        valid=false;break;
+      }
+      text+=s.ch;
+    }
+  }
+  return null;
+}
+function read(image,options={}){
+  const {width:w,height:h,data}=image;if(!w||!h||!data)return [];
+  const hits=new Map(),rows=Math.min(options.rows||55,h-2),slopes=options.slopes||[0];
+  const fractions=[.45,.55,.35,.65,.25,.75];
+  for(let ri=0;ri<rows;ri++){
+    const y=Math.round(1+(h-3)*(ri+.5)/rows);
+    for(const slope of slopes){
+      const g=new Float32Array(w);let min=255,max=0;
+      for(let x=0;x<w;x++){
+        const yy=Math.min(h-2,Math.max(1,Math.round(y+(x-w/2)*slope))),k=(yy*w+x)*4;
+        // Average vertically to suppress sensor/JPEG noise without smearing narrow bars.
+        const val=(data[k-w*4]+2*data[k]+data[k+w*4])*0.075+(data[k-w*4+1]+2*data[k+1]+data[k+w*4+1])*.1475+(data[k-w*4+2]+2*data[k+2]+data[k+w*4+2])*.0275;
+        g[x]=val;min=Math.min(min,val);max=Math.max(max,val);
+      }
+      if(max-min<24)continue;
+      let found=null;
+      for(const fraction of fractions){
+        found=lineDecode(g,min+(max-min)*fraction);
+        if(!found){g.reverse();found=lineDecode(g,min+(max-min)*fraction);g.reverse();}
+        if(found)break;
+      }
+      if(!found){
+        // Local brightness normalization for uneven exposure; no character substitution.
+        const local=new Float32Array(w);
+        for(let x=0;x<w;x++){
+          let lo=255,hi=0;
+          for(let xx=Math.max(0,x-16);xx<=Math.min(w-1,x+16);xx++){lo=Math.min(lo,g[xx]);hi=Math.max(hi,g[xx]);}
+          local[x]=Math.max(0,Math.min(255,255*(g[x]-lo)/Math.max(18,hi-lo)));
+        }
+        for(const f of fractions){
+          found=lineDecode(local,255*f);
+          if(!found){local.reverse();found=lineDecode(local,255*f);local.reverse();}
+          if(found)break;
+        }
+      }
+      if(found){
+        let v=hits.get(found);if(!v){v={text:found,format:'Code39',lines:0,rows:new Set()};hits.set(found,v);}
+        if(!v.rows.has(y)){v.rows.add(y);v.lines++;}
+        if(v.lines>=(options.minLines||2))return [{text:found,format:'Code39',lines:v.lines}];
+      }
+    }
+  }
+  return [...hits.values()].filter(x=>x.lines>=(options.minLines||2)).map(({text,format,lines})=>({text,format,lines}));
+}
+function vin(text){const s=String(text||'').trim();return /^[A-HJ-NPR-Z0-9]{17}$/.test(s)?s:null;}
+const api={read,vin};root.TGCCode39=api;if(typeof module!=='undefined')module.exports=api;
+})(typeof globalThis!=='undefined'?globalThis:window);
+</script>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),video=$('video'),capture=document.createElement('canvas');
+let stream=null,session=0,timer=null,mode='idle',frames=0,candidate='',count=0,lastHit=0,worker=null,job=0,pending=new Map();
+function setStatus(text,type=''){ $('status').textContent=text;$('status').className='stat'+(type?' '+type:''); }
+function setMode(m){mode=m;$('startBtn').disabled=['starting','live','photo'].includes(m);$('stopBtn').disabled=!['starting','live','photo'].includes(m);$('photoFile').disabled=m==='starting'||m==='photo';$('switchBtn').disabled=m==='starting'||m==='photo';}
+function releaseCamera(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;$('camera').hidden=true;$('zoomBox').hidden=true;}
+function stop(quiet=false){session++;clearTimeout(timer);releaseCamera();setMode('idle');if(!quiet)setStatus('Scanner gestoppt.');}
+function issueText(e){if(e.name==='NotAllowedError')return 'Kamerazugriff nicht erlaubt. In den Website-Einstellungen die Kamera freigeben.';if(e.name==='NotFoundError')return 'Keine Kamera gefunden.';if(e.name==='NotReadableError')return 'Kamera ist belegt oder konnte nicht geöffnet werden. Andere Kamera-Apps schließen.';return (e.name||'Fehler')+': '+(e.message||'Bitte erneut starten.');}
+function makeWorker(){
+  if(worker)return worker;
+  const source=document.scripts[0].textContent+'\nself.onmessage=e=>{const {id,image,options}=e.data;try{postMessage({id,result:TGCCode39.read(image,options)});}catch(err){postMessage({id,error:err.message});}};';
+  try{
+    const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));worker=new Worker(url);URL.revokeObjectURL(url);
+    worker.onmessage=e=>{const p=pending.get(e.data.id);if(!p)return;clearTimeout(p.timeout);pending.delete(e.data.id);e.data.error?p.reject(new Error(e.data.error)):p.resolve(e.data.result);};
+    worker.onerror=()=>{for(const p of pending.values()){clearTimeout(p.timeout);p.reject(new Error('Lokaler Decoder konnte nicht ausgeführt werden.'));}pending.clear();worker.terminate();worker=null;};
+  }catch(e){worker=null;}
+  return worker;
+}
+function decode(image,options){
+  const w=makeWorker();if(!w)return Promise.resolve(TGCCode39.read(image,options));
+  return new Promise((resolve,reject)=>{const id=++job;const timeout=setTimeout(()=>{pending.delete(id);reject(new Error('Auswertung hat zu lange gedauert. Erneut starten.'));},12000);pending.set(id,{resolve,reject,timeout});w.postMessage({id,image,options},[image.data.buffer]);});
+}
+async function enumerate(){
+  try{const list=await navigator.mediaDevices.enumerateDevices(),select=$('cameraSelect');const current=stream?.getVideoTracks()[0].getSettings().deviceId;select.textContent='';let i=0;for(const d of list.filter(d=>d.kind==='videoinput')){const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||'Kamera '+(++i);select.append(o);}if(current)select.value=current;}catch(e){}
+}
+async function setupCapabilities(){
+  const t=stream?.getVideoTracks()[0];if(!t)return;let caps={};try{caps=t.getCapabilities?.()||{};if(caps.focusMode?.includes('continuous'))await t.applyConstraints({advanced:[{focusMode:'continuous'}]});}catch(e){}
+  if(caps.zoom&&Number.isFinite(caps.zoom.min)&&caps.zoom.max>caps.zoom.min){const z=$('zoom');z.min=caps.zoom.min;z.max=Math.min(caps.zoom.max,Math.max(caps.zoom.min,4));z.step=caps.zoom.step||.1;z.value=t.getSettings().zoom||caps.zoom.min;$('zoomValue').textContent=Number(z.value).toFixed(1)+'×';$('zoomBox').hidden=false;}
+}
+async function start(deviceId=''){
+  stop(true);const token=session;setMode('starting');$('result').hidden=true;candidate='';count=0;lastHit=0;frames=0;setStatus('Kamera wird geöffnet …');
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){setMode('idle');setStatus('Diese Testseite direkt über HTTPS in Safari oder Chrome öffnen.','bad');return;}
+  try{
+    const base=deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:'environment'}};
+    let s;
+    try{s=await navigator.mediaDevices.getUserMedia({audio:false,video:{...base,width:{min:1280,ideal:2560},height:{ideal:1440},frameRate:{ideal:20,max:30}}});}
+    catch(e){if(e.name!=='OverconstrainedError')throw e;if(token!==session)return;s=await navigator.mediaDevices.getUserMedia({audio:false,video:{...base,width:{ideal:1920},height:{ideal:1080}}});}
+    if(token!==session){s.getTracks().forEach(t=>t.stop());return;}
+    stream=s;$('camera').hidden=false;video.srcObject=s;await video.play();if(token!==session)return;
+    await setupCapabilities();if(token!==session)return;await enumerate();if(token!==session)return;
+    setMode('live');setStatus('Live-Scan läuft – gesamten Barcode mit weißem Rand ins Feld halten.');$('camera').scrollIntoView({block:'nearest',behavior:'smooth'});tick(token);
+  }catch(e){if(token!==session)return;releaseCamera();setMode('idle');setStatus(issueText(e),'bad');}
+}
+function cropCamera(){
+  const vr=video.getBoundingClientRect(),gr=$('guide').getBoundingClientRect(),w=video.videoWidth,h=video.videoHeight;
+  if(!w||!h||!vr.width||!vr.height)return null;
+  const scale=Math.max(vr.width/w,vr.height/h),ox=(w*scale-vr.width)/2,oy=(h*scale-vr.height)/2;
+  const sx=Math.max(0,((gr.left-vr.left)+ox)/scale),sy=Math.max(0,((gr.top-vr.top)+oy)/scale),sw=Math.min(w-sx,gr.width/scale),sh=Math.min(h-sy,gr.height/scale);
+  // Preserve native pixels in the guide. Never downsample to the CSS preview size.
+  capture.width=Math.max(1,Math.round(sw));capture.height=Math.max(3,Math.round(sh));capture.getContext('2d',{willReadFrequently:true}).drawImage(video,sx,sy,sw,sh,0,0,capture.width,capture.height);
+  if($('diagnostic').open){const out=$('cropPreview');out.hidden=false;out.width=capture.width;out.height=capture.height;out.getContext('2d').drawImage(capture,0,0);}
+  return capture.getContext('2d').getImageData(0,0,capture.width,capture.height);
+}
+function showResult(v,source,lines){
+  stop(true);setMode('found');$('vin').value=v;$('resultInfo').textContent=source+' · Code 39 · '+lines+' unabhängige Bildzeilen pro Treffer';$('result').hidden=false;setStatus('Barcode gelesen. VIN bitte mit dem Zettel vergleichen.','good');if(navigator.vibrate)navigator.vibrate(100);$('result').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function tick(token){
+  if(token!==session||mode!=='live')return;
+  try{
+    const image=cropCamera();if(!image){timer=setTimeout(()=>tick(token),300);return;}
+    const begin=performance.now();const w=image.width;const r=await decode(image,{rows:32,slopes:frames%2?[0,-.03,.03]:[0],minLines:2});if(token!==session||mode!=='live')return;frames++;
+    $('metrics').textContent='Kamera '+video.videoWidth+' × '+video.videoHeight+' px · Scanbreite '+w+' px · Durchlauf '+frames+' · '+Math.round(performance.now()-begin)+' ms';
+    const v=r.length?TGCCode39.vin(r[0].text):null;
+    if(v){const now=performance.now();if(v===candidate&&now-lastHit<2500)count++;else{candidate=v;count=1;}lastHit=now;setStatus('Gelesen: '+v+' · Bestätigung '+count+'/3');if(count>=3){showResult(v,'3 Live-Bilder übereinstimmend',r[0].lines);return;}}
+    else if(r.length){candidate='';count=0;setStatus('Code 39 gelesen, aber Inhalt ist keine vollständige VIN: '+r[0].text,'bad');}
+    else{if(performance.now()-lastHit>2500){candidate='';count=0;}if(frames%5===0)setStatus('Noch kein vollständiger Code. Barcode samt Rand größer ins Bild nehmen, scharf stellen lassen.');}
+  }catch(e){if(token!==session)return;setStatus(issueText(e),'bad');stop(true);return;}
+  if(token===session&&mode==='live')timer=setTimeout(()=>tick(token),200);
+}
+async function fromPhoto(file){
+  if(!file)return;stop(true);const token=session;setMode('photo');$('result').hidden=true;setStatus('Vorhandenes Foto wird lokal geprüft …');const url=URL.createObjectURL(file);
+  try{
+    const im=new Image();im.src=url;await im.decode();if(token!==session)return;
+    const c=document.createElement('canvas'),scale=Math.min(1,3000/im.width);c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(im,0,0,c.width,c.height);
+    const r=await decode(ctx.getImageData(0,0,c.width,c.height),{rows:100,slopes:[0,-.035,.035],minLines:2});if(token!==session)return;setMode('idle');
+    const v=r.length?TGCCode39.vin(r[0].text):null;
+    if(v)showResult(v,'Aus vorhandenem Foto',r[0].lines);else setStatus(r.length?'Barcode gelesen, aber Inhalt ist keine vollständige VIN: '+r[0].text:'Kein vollständiger Code-39-Barcode im Foto erkannt. Es wurde keine VIN geraten.','bad');
+  }catch(e){if(token===session){setMode('idle');setStatus(issueText(e),'bad');}}finally{URL.revokeObjectURL(url);$('photoFile').value='';}
+}
+$('startBtn').onclick=()=>start();$('stopBtn').onclick=()=>stop();$('againBtn').onclick=()=>start();$('switchBtn').onclick=()=>start($('cameraSelect').value);$('photoFile').onchange=e=>fromPhoto(e.target.files[0]);
+$('zoom').oninput=async e=>{const t=stream?.getVideoTracks()[0];if(!t)return;try{await t.applyConstraints({advanced:[{zoom:Number(e.target.value)}]});$('zoomValue').textContent=Number(e.target.value).toFixed(1)+'×';}catch(err){setStatus('Dieser Kamerazoom konnte nicht eingestellt werden.');}};
+$('copyBtn').onclick=async()=>{try{await navigator.clipboard.writeText($('vin').value);$('copyBtn').textContent='Kopiert';setTimeout(()=>$('copyBtn').textContent='VIN kopieren',1500);}catch(e){$('vin').select();setStatus('VIN markiert – über das Kopiermenü kopieren.');}};
+window.addEventListener('pagehide',()=>stop(true));document.addEventListener('visibilitychange',()=>{if(document.hidden&&['live','starting'].includes(mode))stop();});
+$('debugText').textContent='v15 · integrierter Code-39-Decoder · keine externen Scan-Aufrufe';
+</script></body></html>
