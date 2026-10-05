@@ -6,8 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>TGC Fahrzeugeingang – VIN Foto Scanner v12</title>
+<title>TGC Fahrzeugeingang – TGC VIN & Barcode Scanner v13</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.23.0/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
 :root{
@@ -66,23 +67,24 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · VIN Foto Scanner v12</div>
+  <div class="sub">Smartphone-Test · TGC VIN & Barcode Scanner v13</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
-    <span class="badge">Schritt 1 von 4 · v12</span>
+    <span class="badge">Schritt 1 von 4 · v13</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → VIN sauber in den grünen Rahmen legen → großen runden Auslöser direkt im Kamerabild antippen. Erst das eingefrorene Bild wird lokal ausgewertet.</div>
+    <div class="small">Für TGC-Zettel direkt den Barcode scannen. Alternativ kann die VIN weiterhin per Foto gelesen werden.</div>
     <div class="controls">
-      <button id="startBtn" class="btn primary" type="button">📷 Kamera starten</button>
+      <button id="startBtn" class="btn primary" type="button">📷 VIN-Foto</button>
       <button id="stopBtn" class="btn secondary" type="button">⏹ Kamera stoppen</button>
     </div>
+    <button id="barcodeBtn" class="btn ok" type="button">▥ TGC-Barcode scannen</button>
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
       <div class="scan-text">VIN komplett in den grünen Rahmen legen</div><button id="captureBtn" class="capture-overlay" type="button" aria-label="VIN fotografieren" disabled></button>
     </div>
-    <div id="status" class="status">Scanner noch nicht gestartet.</div>
+    <div class="helper">Tipp: Für eure gedruckten TGC-Zettel am besten direkt <b>„TGC-Barcode scannen“</b> verwenden.</div><div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
     <label>Fallback: VIN-Foto aufnehmen</label>
     <input id="vinPhoto" type="file" accept="image/*" capture="environment">
@@ -135,7 +137,7 @@ canvas{display:none}
   </section>
 </div>
 <script>
-let worker=null,stream=null,scanning=false,ocrBusy=false,hasDamage=null;
+let worker=null,stream=null,scanning=false,ocrBusy=false,hasDamage=null,barcodeReader=null,barcodeControls=null;
 const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas'),qrCanvas=document.getElementById('qrCanvas'),captureCanvas=document.getElementById('captureCanvas'),capturePreview=document.getElementById('capturePreview'),captureBtn=document.getElementById('captureBtn');
 const translit={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
 const weights=[8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
@@ -315,6 +317,66 @@ async function captureVin(){
   }
 }
 
+
+function extractVinFromBarcode(text){
+  const raw=(text||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(raw.length===17 && /^[A-HJ-NPR-Z0-9]{17}$/.test(raw)) return raw;
+  const m=raw.match(/[A-HJ-NPR-Z0-9]{17}/);
+  return m?m[0]:null;
+}
+
+async function startBarcodeScanner(){
+  try{
+    // Stop our own camera first so ZXing can take over cleanly.
+    stopScanner();
+
+    if(typeof ZXing==='undefined'){
+      setStatus('Barcode-Modul konnte nicht geladen werden. Bitte Seite neu laden.','bad');
+      return;
+    }
+
+    scannerWrap.classList.remove('hidden');
+    document.querySelector('.scan-text').textContent='TGC-Barcode möglichst groß und waagerecht in die Kamera halten';
+    setStatus('Barcode-Scanner startet …');
+
+    barcodeReader=new ZXing.BrowserMultiFormatReader();
+
+    barcodeControls=await barcodeReader.decodeFromVideoDevice(undefined, video, (result, err)=>{
+      if(result){
+        const text=(result.getText?result.getText():result.text)||'';
+        const vin=extractVinFromBarcode(text);
+
+        if(vin){
+          vinInput.value=vin;
+          validateVIN();
+          detectedBox.textContent='✅ TGC-Barcode erkannt: '+vin;
+          detectedBox.classList.remove('hidden');
+          setStatus('Barcode erfolgreich gelesen und VIN eingetragen.','good');
+
+          try{ barcodeReader.reset(); }catch(e){}
+          barcodeControls=null;
+          scannerWrap.classList.add('hidden');
+          if(navigator.vibrate) navigator.vibrate([80,50,80]);
+        }else{
+          setStatus('Barcode gelesen, aber keine 17-stellige VIN gefunden: '+text,'bad');
+        }
+      }
+    });
+
+    setStatus('Barcode-Scanner aktiv – Barcode möglichst groß ins Bild halten.');
+  }catch(err){
+    setStatus('Barcode-Scanner konnte nicht gestartet werden: '+(err?.message||'unbekannt'),'bad');
+  }
+}
+
+function stopBarcodeScanner(){
+  try{
+    if(barcodeReader) barcodeReader.reset();
+  }catch(e){}
+  barcodeReader=null;
+  barcodeControls=null;
+}
+
 async function startScanner(){
 try{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
@@ -343,6 +405,7 @@ try{
   setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad');
 }}
 function stopScanner(){
+  stopBarcodeScanner();
   scanning=false;
   captureBtn.disabled=true;
   if(stream){
@@ -352,7 +415,7 @@ function stopScanner(){
   video.srcObject=null;
   scannerWrap.classList.add('hidden');
 }
-document.getElementById('startBtn').addEventListener('click',startScanner);document.getElementById('stopBtn').addEventListener('click',stopScanner);captureBtn.addEventListener('click',captureVin);
+document.getElementById('startBtn').addEventListener('click',startScanner);document.getElementById('stopBtn').addEventListener('click',stopScanner);document.getElementById('barcodeBtn').addEventListener('click',startBarcodeScanner);captureBtn.addEventListener('click',captureVin);
 document.getElementById('vinPhoto').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;const preview=document.getElementById('vinPreview');preview.src=URL.createObjectURL(file);preview.style.display='block';setStatus('Foto übernommen. VIN-Erkennung startet …');try{const cands=await runOCRonBlob(file);if(!cands.length){setStatus('Keine sichere VIN im Foto erkannt. Bitte manuell eintragen.','bad');return}const best=cands.find(c=>c.valid)||cands[0];acceptVIN(best.vin,best.valid)}catch(err){setStatus('Foto-Erkennung fehlgeschlagen. Bitte manuell eingeben.','bad')}});
 function setProgress(n){for(let i=1;i<=4;i++)document.getElementById('p'+i).classList.toggle('active',i<=n)}
 function go(n){if(n===2&&!validateVIN()){alert('Bitte zuerst eine vollständige VIN erfassen.');return}stopScanner();['step1','step2','step3','step4','done'].forEach(id=>document.getElementById(id).classList.add('hidden'));document.getElementById('step'+n).classList.remove('hidden');setProgress(n);if(n===4)buildSummary();window.scrollTo({top:0,behavior:'smooth'})}
