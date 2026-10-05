@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>TGC Fahrzeugeingang – Live VIN Scanner v10</title>
+<title>TGC Fahrzeugeingang – VIN Foto Scanner v11</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
@@ -63,21 +63,22 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · Live VIN Scanner v10 · Exakter Scanrahmen</div>
+  <div class="sub">Smartphone-Test · VIN Foto Scanner v11</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
-    <span class="badge">Schritt 1 von 4 · v10</span>
+    <span class="badge">Schritt 1 von 4 · v11</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → nur die 17-stellige FIN exakt in den grünen Rahmen halten. Gelesen wird ausschließlich dieser sichtbare Bereich.</div>
+    <div class="small">Kamera starten → VIN sauber in den grünen Rahmen legen → „VIN fotografieren“ drücken. Erst das eingefrorene Bild wird lokal ausgewertet.</div>
     <div class="controls">
-      <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
-      <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
+      <button id="startBtn" class="btn primary" type="button">📷 Kamera starten</button>
+      <button id="captureBtn" class="btn ok" type="button" disabled>📸 VIN fotografieren</button>
     </div>
+    <button id="stopBtn" class="btn secondary" type="button">⏹ Kamera stoppen</button>
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
-      <div class="scan-text">Nur die komplette 17-stellige VIN in den grünen Rahmen legen</div>
+      <div class="scan-text">VIN komplett in den grünen Rahmen legen · dann Foto drücken</div>
     </div>
     <div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
@@ -90,7 +91,7 @@ canvas{display:none}
     <label>Kennzeichen (optional)</label><input id="plate" placeholder="z. B. WI-UC1291">
     <label>Spediteur / Fahrer (optional)</label><input id="carrier" placeholder="z. B. Muster Spedition">
     <button id="next1" class="btn primary" type="button" disabled>Weiter zu Fotos</button>
-    <canvas id="ocrCanvas"></canvas><canvas id="qrCanvas"></canvas>
+    <canvas id="ocrCanvas"></canvas><canvas id="qrCanvas"></canvas><canvas id="captureCanvas"></canvas><img id="capturePreview" class="preview" alt="Aufgenommenes VIN-Bild">
   </section>
 
   <section id="step2" class="card hidden">
@@ -132,8 +133,8 @@ canvas{display:none}
   </section>
 </div>
 <script>
-let worker=null,stream=null,scanning=false,scanTimer=null,ocrBusy=false,hasDamage=null,stableCandidate='',stableCount=0,scanVariant=0;
-const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas'),qrCanvas=document.getElementById('qrCanvas');
+let worker=null,stream=null,scanning=false,ocrBusy=false,hasDamage=null;
+const vinInput=document.getElementById('vin'),nextBtn=document.getElementById('next1'),statusBox=document.getElementById('status'),detectedBox=document.getElementById('detected'),scannerWrap=document.getElementById('scannerWrap'),video=document.getElementById('video'),canvas=document.getElementById('ocrCanvas'),qrCanvas=document.getElementById('qrCanvas'),captureCanvas=document.getElementById('captureCanvas'),capturePreview=document.getElementById('capturePreview'),captureBtn=document.getElementById('captureBtn');
 const translit={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
 const weights=[8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 function normalizeVIN(text){return(text||'').toUpperCase().replace(/[IOQ]/g,'').replace(/[^A-HJ-NPR-Z0-9]/g,'')}
@@ -195,113 +196,127 @@ function validateVIN(){const v=normalizeVIN(vinInput.value).slice(0,17);vinInput
 vinInput.addEventListener('input',validateVIN);nextBtn.addEventListener('click',()=>go(2));
 async function getWorker(){if(worker)return worker;if(typeof Tesseract==='undefined')throw new Error('OCR-Bibliothek nicht geladen.');setStatus('Texterkennung wird vorbereitet …');worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'&&scanning)setStatus('Live-Scan läuft … '+Math.round(m.progress*100)+'%')}});await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',preserve_interword_spaces:'0',tessedit_pageseg_mode:'7'});return worker}
 function candidateScore(vin){let score=0;if(vin.length===17)score+=100;if(vinCheckValid(vin))score+=500;if(/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))score+=30;if(/^[A-Z]{3}/.test(vin))score+=20;if(/(.)\1{4,}/.test(vin))score-=120;if(/[A-Z]{10,}/.test(vin))score-=40;if(/^WBS/.test(vin))score+=40;if(/^WBA/.test(vin))score+=30;if(/^WVW|^WAU|^VF1|^W0L|^ZFA/.test(vin))score+=20;return score}
+function fixOcrVin(s){
+  let x=(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  // VIN excludes I, O, Q. Common OCR substitutions:
+  x=x.replace(/O/g,'0').replace(/I/g,'1').replace(/Q/g,'0');
+  return x;
+}
 function extractCandidates(text){
   const out=[];
   const lines=(text||'').toUpperCase().split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-
   for(const line of lines){
-    const cleaned=line
-      .replace(/[^A-Z0-9]/g,'')
-      .replace(/[IOQ]/g,'');
-
-    // Reject contaminated lines completely. Never cut a 17-char window out of longer text.
-    if(cleaned.length!==17) continue;
-    if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned)) continue;
-
-    out.push({vin:cleaned,valid:true,score:100});
+    const cleaned=fixOcrVin(line);
+    if(cleaned.length===17 && /^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned)){
+      out.push({vin:cleaned,valid:true,score:100});
+    }
   }
   return out;
 }
 function acceptVIN(vin,safe=false){vinInput.value=vin;validateVIN();detectedBox.textContent=(safe?'✅ Sichere VIN erkannt: ':'✅ VIN erkannt: ')+vin;detectedBox.classList.remove('hidden');setStatus(safe?'VIN live erkannt und bestätigt.':'VIN live erkannt. Bitte kurz prüfen.','good');if(navigator.vibrate)navigator.vibrate([80,50,80]);stopScanner()}
 async function runOCRonBlob(blob){const w=await getWorker(),result=await w.recognize(blob),text=result&&result.data?result.data.text:'';return extractCandidates(text)}
-async function scanFrame(){
-if(!scanning||ocrBusy||!video.videoWidth||!video.videoHeight)return scheduleNextScan();
-ocrBusy=true;
-try{
+function getOverlayCrop(){
   const overlay=document.querySelector('.scan-box');
   const vr=video.getBoundingClientRect();
   const or=overlay.getBoundingClientRect();
-
   const srcW=video.videoWidth, srcH=video.videoHeight;
-  const boxW=vr.width, boxH=vr.height;
-
-  // Map CSS object-fit: cover coordinates back to the real camera frame.
-  const scale=Math.max(boxW/srcW, boxH/srcH);
-  const renderedW=srcW*scale;
-  const renderedH=srcH*scale;
-  const cropX=(renderedW-boxW)/2;
-  const cropY=(renderedH-boxH)/2;
-
+  const scale=Math.max(vr.width/srcW, vr.height/srcH);
+  const renderedW=srcW*scale, renderedH=srcH*scale;
+  const cropX=(renderedW-vr.width)/2, cropY=(renderedH-vr.height)/2;
   let sx=((or.left-vr.left)+cropX)/scale;
   let sy=((or.top-vr.top)+cropY)/scale;
   let sw=or.width/scale;
   let sh=or.height/scale;
-
   sx=Math.max(0,Math.min(srcW-1,sx));
   sy=Math.max(0,Math.min(srcH-1,sy));
   sw=Math.max(1,Math.min(srcW-sx,sw));
   sh=Math.max(1,Math.min(srcH-sy,sh));
+  return {sx,sy,sw,sh};
+}
 
-  const base=document.createElement('canvas');
-  const bctx=base.getContext('2d',{willReadFrequently:true});
+async function recognizeCanvas(inputCanvas){
+  const passes=[];
 
-  // Upscale the exact visible scan band for OCR.
-  const targetW=1800;
-  base.width=targetW;
-  base.height=Math.max(180,Math.round(targetW*(sh/sw)));
-  bctx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);
+  // Original
+  passes.push(inputCanvas);
 
-  const passes=[base];
-
-  // Contrast-enhanced pass.
+  // Contrast
   const contrast=document.createElement('canvas');
-  contrast.width=base.width;
-  contrast.height=base.height;
-  const ctx=contrast.getContext('2d',{willReadFrequently:true});
-  ctx.drawImage(base,0,0);
-  const img=ctx.getImageData(0,0,contrast.width,contrast.height);
-  const d=img.data;
+  contrast.width=inputCanvas.width; contrast.height=inputCanvas.height;
+  const cctx=contrast.getContext('2d',{willReadFrequently:true});
+  cctx.drawImage(inputCanvas,0,0);
+  let img=cctx.getImageData(0,0,contrast.width,contrast.height),d=img.data;
   for(let i=0;i<d.length;i+=4){
     const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    const v=Math.max(0,Math.min(255,(g-128)*1.9+128));
+    const v=Math.max(0,Math.min(255,(g-128)*2.0+128));
     d[i]=d[i+1]=d[i+2]=v;
   }
-  ctx.putImageData(img,0,0);
+  cctx.putImageData(img,0,0);
   passes.push(contrast);
 
-  let candidate=null;
-  for(const pass of passes){
-    const blob=await new Promise(res=>pass.toBlob(res,'image/jpeg',.98));
-    const result=await runOCRonBlob(blob);
-    if(result.length){ candidate=result[0].vin; break; }
+  // Threshold
+  const threshold=document.createElement('canvas');
+  threshold.width=inputCanvas.width; threshold.height=inputCanvas.height;
+  const tctx=threshold.getContext('2d',{willReadFrequently:true});
+  tctx.drawImage(inputCanvas,0,0);
+  img=tctx.getImageData(0,0,threshold.width,threshold.height); d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    const v=g>145?255:0;
+    d[i]=d[i+1]=d[i+2]=v;
   }
+  tctx.putImageData(img,0,0);
+  passes.push(threshold);
 
-  if(candidate){
-    if(candidate===stableCandidate) stableCount++;
-    else { stableCandidate=candidate; stableCount=1; }
+  for(let i=0;i<passes.length;i++){
+    setStatus('Foto wird ausgewertet … Variante '+(i+1)+'/3');
+    const blob=await new Promise(res=>passes[i].toBlob(res,'image/jpeg',.98));
+    const cands=await runOCRonBlob(blob);
+    if(cands.length) return cands[0].vin;
+  }
+  return null;
+}
 
-    setStatus('VIN erkannt: '+candidate+' · Bestätigung '+stableCount+'/2','good');
+async function captureVin(){
+  if(!stream||!video.videoWidth||ocrBusy) return;
+  ocrBusy=true;
+  captureBtn.disabled=true;
+  try{
+    const {sx,sy,sw,sh}=getOverlayCrop();
+    const targetW=2200;
+    captureCanvas.width=targetW;
+    captureCanvas.height=Math.max(220,Math.round(targetW*(sh/sw)));
+    const ctx=captureCanvas.getContext('2d',{willReadFrequently:true});
+    ctx.drawImage(video,sx,sy,sw,sh,0,0,captureCanvas.width,captureCanvas.height);
 
-    if(stableCount>=2){
-      acceptVIN(candidate,true);
-      return;
+    capturePreview.src=captureCanvas.toDataURL('image/jpeg',.95);
+    capturePreview.style.display='block';
+
+    setStatus('Foto aufgenommen – VIN wird lokal gelesen …');
+    const vin=await recognizeCanvas(captureCanvas);
+
+    if(vin){
+      vinInput.value=vin;
+      validateVIN();
+      detectedBox.textContent='✅ VIN erkannt: '+vin;
+      detectedBox.classList.remove('hidden');
+      setStatus('VIN aus Foto erkannt und eingetragen.','good');
+      if(navigator.vibrate) navigator.vibrate([80,50,80]);
+    }else{
+      setStatus('VIN im Foto nicht sicher erkannt. Bitte etwas näher/gerader ausrichten und erneut fotografieren.','bad');
     }
-  }else{
-    stableCandidate='';
-    stableCount=0;
-    setStatus('Noch keine saubere 17-stellige VIN erkannt – VIN komplett im grünen Rahmen halten.');
+  }catch(err){
+    setStatus('Foto-Auswertung fehlgeschlagen: '+(err?.message||'unbekannt'),'bad');
+  }finally{
+    ocrBusy=false;
+    captureBtn.disabled=!stream;
   }
-}catch(err){
-  setStatus('Scannerfehler: '+(err?.message||'unbekannt'),'bad');
-}finally{
-  ocrBusy=false;
-  scheduleNextScan();
-}}
-function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,900)}
+}
+
 async function startScanner(){
 try{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    setStatus('Dein Browser unterstützt keine Live-Kamera. Bitte den Foto-Fallback nutzen.','bad');return
+    setStatus('Dein Browser unterstützt keine Live-Kamera. Bitte den Foto-Fallback nutzen.','bad');return;
   }
   stream=await navigator.mediaDevices.getUserMedia({
     video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}},
@@ -315,22 +330,27 @@ try{
     const caps=track.getCapabilities?track.getCapabilities():{};
     const adv=[];
     if(caps.focusMode&&caps.focusMode.includes('continuous')) adv.push({focusMode:'continuous'});
-    if(caps.zoom){
-      const z=Math.min(caps.zoom.max||2,Math.max(caps.zoom.min||1,1.7));
-      adv.push({zoom:z});
-    }
     if(adv.length) await track.applyConstraints({advanced:adv});
   }catch(e){}
 
   scannerWrap.classList.remove('hidden');
-  scanning=true;stableCandidate='';stableCount=0;scanVariant=0;
-  setStatus('VIN-Zeilenmodus aktiv – bitte nur die 17-stellige VIN in den grünen Rahmen setzen.');
-  scheduleNextScan()
+  scanning=true;
+  captureBtn.disabled=false;
+  setStatus('Kamera bereit – VIN ausrichten und dann „VIN fotografieren“ drücken.');
 }catch(err){
-  setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad')
+  setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad');
 }}
-function stopScanner(){scanning=false;if(scanTimer)clearTimeout(scanTimer);scanTimer=null;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;scannerWrap.classList.add('hidden');if(!validateVIN())setStatus('Scanner gestoppt.')}
-document.getElementById('startBtn').addEventListener('click',startScanner);document.getElementById('stopBtn').addEventListener('click',stopScanner);
+function stopScanner(){
+  scanning=false;
+  captureBtn.disabled=true;
+  if(stream){
+    stream.getTracks().forEach(t=>t.stop());
+    stream=null;
+  }
+  video.srcObject=null;
+  scannerWrap.classList.add('hidden');
+}
+document.getElementById('startBtn').addEventListener('click',startScanner);document.getElementById('stopBtn').addEventListener('click',stopScanner);captureBtn.addEventListener('click',captureVin);
 document.getElementById('vinPhoto').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;const preview=document.getElementById('vinPreview');preview.src=URL.createObjectURL(file);preview.style.display='block';setStatus('Foto übernommen. VIN-Erkennung startet …');try{const cands=await runOCRonBlob(file);if(!cands.length){setStatus('Keine sichere VIN im Foto erkannt. Bitte manuell eintragen.','bad');return}const best=cands.find(c=>c.valid)||cands[0];acceptVIN(best.vin,best.valid)}catch(err){setStatus('Foto-Erkennung fehlgeschlagen. Bitte manuell eingeben.','bad')}});
 function setProgress(n){for(let i=1;i<=4;i++)document.getElementById('p'+i).classList.toggle('active',i<=n)}
 function go(n){if(n===2&&!validateVIN()){alert('Bitte zuerst eine vollständige VIN erfassen.');return}stopScanner();['step1','step2','step3','step4','done'].forEach(id=>document.getElementById(id).classList.add('hidden'));document.getElementById('step'+n).classList.remove('hidden');setProgress(n);if(n===4)buildSummary();window.scrollTo({top:0,behavior:'smooth'})}
