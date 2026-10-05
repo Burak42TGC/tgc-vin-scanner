@@ -74,7 +74,7 @@ canvas{display:none}
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
-      <div class="scan-text">VIN + QR möglichst gemeinsam im grünen Bereich halten</div>
+      <div class="scan-text">Nur die 17-stellige VIN in die grüne Zeile legen</div>
     </div>
     <div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
@@ -190,111 +190,85 @@ function vinCheckValid(vin){vin=normalizeVIN(vin);if(vin.length!==17)return fals
 function setStatus(text,type=''){statusBox.className='status'+(type?' '+type:'');statusBox.textContent=text}
 function validateVIN(){const v=normalizeVIN(vinInput.value).slice(0,17);vinInput.value=v;nextBtn.disabled=v.length!==17;return v.length===17}
 vinInput.addEventListener('input',validateVIN);nextBtn.addEventListener('click',()=>go(2));
-async function getWorker(){if(worker)return worker;if(typeof Tesseract==='undefined')throw new Error('OCR-Bibliothek nicht geladen.');setStatus('Texterkennung wird vorbereitet …');worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'&&scanning)setStatus('Live-Scan läuft … '+Math.round(m.progress*100)+'%')}});await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',preserve_interword_spaces:'1'});return worker}
+async function getWorker(){if(worker)return worker;if(typeof Tesseract==='undefined')throw new Error('OCR-Bibliothek nicht geladen.');setStatus('Texterkennung wird vorbereitet …');worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'&&scanning)setStatus('Live-Scan läuft … '+Math.round(m.progress*100)+'%')}});await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',preserve_interword_spaces:'0',tessedit_pageseg_mode:'7'});return worker}
 function candidateScore(vin){let score=0;if(vin.length===17)score+=100;if(vinCheckValid(vin))score+=500;if(/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))score+=30;if(/^[A-Z]{3}/.test(vin))score+=20;if(/(.)\1{4,}/.test(vin))score-=120;if(/[A-Z]{10,}/.test(vin))score-=40;if(/^WBS/.test(vin))score+=40;if(/^WBA/.test(vin))score+=30;if(/^WVW|^WAU|^VF1|^W0L|^ZFA/.test(vin))score+=20;return score}
-function extractCandidates(text){const set=new Set(),up=(text||'').toUpperCase(),lines=up.split(/\r?\n/);for(const line of lines){const compact=normalizeVIN(line);if(compact.length>=17){for(let i=0;i<=compact.length-17;i++)set.add(compact.slice(i,i+17))}}const all=normalizeVIN(up);if(all.length>=17){for(let i=0;i<=all.length-17;i++)set.add(all.slice(i,i+17))}return Array.from(set).map(v=>({vin:v,valid:vinCheckValid(v),score:candidateScore(v)})).sort((a,b)=>b.score-a.score)}
+function extractCandidates(text){
+  const set=new Set();
+  const up=(text||'').toUpperCase();
+
+  // Prefer individual OCR lines; never concatenate unrelated lines.
+  const lines=up.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  for(const line of lines){
+    const raw=line.replace(/[^A-Z0-9]/g,'');
+    // VINs never contain I, O or Q.
+    const cleaned=raw.replace(/[IOQ]/g,'');
+    if(cleaned.length===17 && /^[A-HJ-NPR-Z0-9]{17}$/.test(cleaned)){
+      set.add(cleaned);
+    }else if(cleaned.length>17){
+      for(let i=0;i<=cleaned.length-17;i++){
+        const part=cleaned.slice(i,i+17);
+        if(/^[A-HJ-NPR-Z0-9]{17}$/.test(part)) set.add(part);
+      }
+    }
+  }
+
+  return Array.from(set).map(v=>({
+    vin:v,
+    valid:true,
+    score:100
+  }));
+}
 function acceptVIN(vin,safe=false){vinInput.value=vin;validateVIN();detectedBox.textContent=(safe?'✅ Sichere VIN erkannt: ':'✅ VIN erkannt: ')+vin;detectedBox.classList.remove('hidden');setStatus(safe?'VIN live erkannt und bestätigt.':'VIN live erkannt. Bitte kurz prüfen.','good');if(navigator.vibrate)navigator.vibrate([80,50,80]);stopScanner()}
 async function runOCRonBlob(blob){const w=await getWorker(),result=await w.recognize(blob),text=result&&result.data?result.data.text:'';return extractCandidates(text)}
 async function scanFrame(){
 if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();
 ocrBusy=true;
 try{
-  // QR remains an optional fast path.
-  const qrVin=tryQrFrame();
-  if(qrVin){
-    setStatus('QR erkannt: '+qrVin,'good');
-    acceptVIN(qrVin,true);
-    return;
-  }
-
   const vw=video.videoWidth, vh=video.videoHeight;
 
-  // IMPORTANT: OCR exactly the same narrow strip shown by the green VIN frame.
-  const sx=Math.floor(vw*.06);
-  const sy=Math.floor(vh*.365);
-  const sw=Math.floor(vw*.88);
-  const sh=Math.floor(vh*.135);
+  // Crop only the same narrow horizontal band shown by the green guide.
+  const sx=Math.floor(vw*.05);
+  const sy=Math.floor(vh*.39);
+  const sw=Math.floor(vw*.90);
+  const sh=Math.floor(vh*.12);
 
   const base=document.createElement('canvas');
   const bctx=base.getContext('2d',{willReadFrequently:true});
-  base.width=Math.min(1800,Math.max(1200,sw));
-  base.height=Math.max(160,Math.round(base.width*(sh/sw)));
+  base.width=Math.min(1800,Math.max(1400,sw));
+  base.height=Math.max(180,Math.round(base.width*(sh/sw)));
   bctx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);
 
-  const w=await getWorker();
+  const passes=[base];
 
-  // Tell Tesseract this is ONE line, not a document.
-  await w.setParameters({
-    tessedit_char_whitelist:'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
-    tessedit_pageseg_mode:'7',
-    preserve_interword_spaces:'0'
-  });
-
-  const variants=[];
-
-  // A: original — best for printed paper.
-  variants.push(base);
-
-  // B: grayscale with moderate contrast.
-  const gray=document.createElement('canvas');
-  gray.width=base.width; gray.height=base.height;
-  const gctx=gray.getContext('2d',{willReadFrequently:true});
-  gctx.drawImage(base,0,0);
-  let img=gctx.getImageData(0,0,gray.width,gray.height), d=img.data;
+  // High-contrast grayscale pass.
+  const contrast=document.createElement('canvas');
+  contrast.width=base.width; contrast.height=base.height;
+  const cctx=contrast.getContext('2d',{willReadFrequently:true});
+  cctx.drawImage(base,0,0);
+  let img=cctx.getImageData(0,0,contrast.width,contrast.height),d=img.data;
   for(let i=0;i<d.length;i+=4){
     const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    const v=Math.max(0,Math.min(255,(g-128)*1.55+128));
+    const v=Math.max(0,Math.min(255,(g-128)*2.2+128));
     d[i]=d[i+1]=d[i+2]=v;
   }
-  gctx.putImageData(img,0,0);
-  variants.push(gray);
-
-  // C: black/white for windshield labels.
-  const bw=document.createElement('canvas');
-  bw.width=base.width; bw.height=base.height;
-  const bwctx=bw.getContext('2d',{willReadFrequently:true});
-  bwctx.drawImage(base,0,0);
-  img=bwctx.getImageData(0,0,bw.width,bw.height); d=img.data;
-  for(let i=0;i<d.length;i+=4){
-    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    const v=g>145?255:0;
-    d[i]=d[i+1]=d[i+2]=v;
-  }
-  bwctx.putImageData(img,0,0);
-  variants.push(bw);
+  cctx.putImageData(img,0,0);
+  passes.push(contrast);
 
   let found=[];
-  let debugText='';
-
-  for(const variant of variants){
-    const result=await w.recognize(variant);
-    const raw=(result&&result.data&&result.data.text?result.data.text:'').trim().toUpperCase();
-    debugText += (debugText?' | ':'') + raw;
-    const direct=raw.match(/[A-HJ-NPR-Z0-9]{17}/g);
-    if(direct){
-      for(const vin of direct) found.push({vin,valid:vinCheckValid(vin),score:candidateScore(vin)+100});
-    }
-    const compact=normalizeVIN(raw);
-    if(compact.length===17){
-      found.push({vin:compact,valid:vinCheckValid(compact),score:candidateScore(compact)+80});
-    }
+  for(const pass of passes){
+    const blob=await new Promise(res=>pass.toBlob(res,'image/jpeg',.98));
+    const cands=await runOCRonBlob(blob);
+    if(cands.length){ found=cands; break; }
   }
 
   if(found.length){
-    const uniq=new Map();
-    for(const x of found){
-      const old=uniq.get(x.vin);
-      if(!old||x.score>old.score)uniq.set(x.vin,x);
-    }
-    const list=Array.from(uniq.values()).sort((a,b)=>b.score-a.score);
-    const best=list[0];
+    const best=found[0];
+    if(best.vin===stableCandidate) stableCount+=1;
+    else { stableCandidate=best.vin; stableCount=1; }
 
-    if(best.vin===stableCandidate)stableCount++;
-    else{stableCandidate=best.vin;stableCount=1}
+    setStatus('VIN erkannt: '+best.vin+' · '+stableCount+'/2','good');
 
-    setStatus('Gelesen: '+best.vin+' · '+stableCount+'/2','good');
-
-    // For line-mode, two identical reads are enough. Do not require US check-digit rules.
+    // Two identical reads are enough. No mandatory US check-digit rule.
     if(stableCount>=2){
       acceptVIN(best.vin,true);
       return;
@@ -302,8 +276,7 @@ try{
   }else{
     stableCandidate='';
     stableCount=0;
-    const short=debugText.replace(/\s+/g,' ').slice(0,55);
-    setStatus(short ? 'OCR sieht: "'+short+'" – VIN noch nicht vollständig.' : 'Noch keine VIN-Zeile erkannt – etwas näher ran und ruhig halten.');
+    setStatus('Noch nichts erkannt – nur die VIN-Zeile in den grünen Rahmen legen.');
   }
 }catch(err){
   setStatus('Scannerfehler: '+(err&&err.message?err.message:'unbekannt'),'bad');
