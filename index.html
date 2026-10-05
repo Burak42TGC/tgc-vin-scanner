@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>TGC Fahrzeugeingang – VIN Foto Scanner v11</title>
+<title>TGC Fahrzeugeingang – VIN Foto Scanner v12</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
@@ -55,7 +55,10 @@ textarea{min-height:90px}
 .scanner video{width:100%;display:block;aspect-ratio:3/4;object-fit:cover;background:#000}
 .scan-box{position:absolute;left:5%;right:5%;top:39%;height:11%;border:2px solid var(--scan);border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.42);pointer-events:none}
 .scan-line{position:absolute;left:6%;right:6%;top:44.5%;height:2px;background:var(--scan);box-shadow:0 0 12px var(--scan);pointer-events:none}
-.scan-text{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(0,0,0,.7);padding:8px 10px;border-radius:10px;font-size:12px;text-align:center}
+.scan-text{position:absolute;left:10px;right:10px;bottom:86px;background:rgba(0,0,0,.7);padding:8px 10px;border-radius:10px;font-size:12px;text-align:center}
+.capture-overlay{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);width:68px;height:68px;border-radius:50%;border:5px solid rgba(255,255,255,.95);background:rgba(255,255,255,.22);box-shadow:0 2px 14px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:5}
+.capture-overlay::after{content:"";width:48px;height:48px;border-radius:50%;background:#fff}
+.capture-overlay:disabled{opacity:.4;cursor:not-allowed}
 .controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 canvas{display:none}
 </style>
@@ -63,22 +66,21 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · VIN Foto Scanner v11</div>
+  <div class="sub">Smartphone-Test · VIN Foto Scanner v12</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
-    <span class="badge">Schritt 1 von 4 · v11</span>
+    <span class="badge">Schritt 1 von 4 · v12</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → VIN sauber in den grünen Rahmen legen → „VIN fotografieren“ drücken. Erst das eingefrorene Bild wird lokal ausgewertet.</div>
+    <div class="small">Kamera starten → VIN sauber in den grünen Rahmen legen → großen runden Auslöser direkt im Kamerabild antippen. Erst das eingefrorene Bild wird lokal ausgewertet.</div>
     <div class="controls">
       <button id="startBtn" class="btn primary" type="button">📷 Kamera starten</button>
-      <button id="captureBtn" class="btn ok" type="button" disabled>📸 VIN fotografieren</button>
+      <button id="stopBtn" class="btn secondary" type="button">⏹ Kamera stoppen</button>
     </div>
-    <button id="stopBtn" class="btn secondary" type="button">⏹ Kamera stoppen</button>
     <div id="scannerWrap" class="scanner hidden">
       <video id="video" playsinline autoplay muted></video>
       <div class="scan-box"></div><div class="scan-line"></div>
-      <div class="scan-text">VIN komplett in den grünen Rahmen legen · dann Foto drücken</div>
+      <div class="scan-text">VIN komplett in den grünen Rahmen legen</div><button id="captureBtn" class="capture-overlay" type="button" aria-label="VIN fotografieren" disabled></button>
     </div>
     <div id="status" class="status">Scanner noch nicht gestartet.</div>
     <div id="detected" class="vin-box hidden"></div>
@@ -336,7 +338,7 @@ try{
   scannerWrap.classList.remove('hidden');
   scanning=true;
   captureBtn.disabled=false;
-  setStatus('Kamera bereit – VIN ausrichten und dann „VIN fotografieren“ drücken.');
+  setStatus('Kamera bereit – VIN ausrichten und den runden Auslöser direkt im Bild antippen.');
 }catch(err){
   setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad');
 }}
