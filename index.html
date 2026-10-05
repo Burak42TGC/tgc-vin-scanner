@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>TGC Fahrzeugeingang – Live VIN Scanner v7</title>
+<title>TGC Fahrzeugeingang – Live VIN Scanner v8</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
@@ -60,13 +60,13 @@ canvas{display:none}
 <body>
 <div class="app">
   <div class="logo">TGC Fahrzeugeingang</div>
-  <div class="sub">Smartphone-Test · Live VIN Scanner v7 · iPhone QR + VIN OCR</div>
+  <div class="sub">Smartphone-Test · Live VIN Scanner v8 · Multi-OCR</div>
   <div class="progress"><div class="dot active" id="p1"></div><div class="dot" id="p2"></div><div class="dot" id="p3"></div><div class="dot" id="p4"></div></div>
 
   <section id="step1" class="card">
     <span class="badge">Schritt 1 von 4</span>
     <h2>FIN live scannen</h2>
-    <div class="small">Kamera starten → eigener QR-Scanner läuft direkt im Browser (auch auf iPhone/Safari). Falls kein QR gefunden wird, läuft die VIN-OCR als Fallback.</div>
+    <div class="small">Kamera starten → QR-Scan, normale OCR und Scheiben-OCR laufen parallel. Papier und VIN hinter Glas werden getrennt verarbeitet.</div>
     <div class="controls">
       <button id="startBtn" class="btn primary" type="button">📷 Live-Scanner starten</button>
       <button id="stopBtn" class="btn secondary" type="button">⏹ Scanner stoppen</button>
@@ -199,55 +199,92 @@ async function scanFrame(){
 if(!scanning||ocrBusy||!video.videoWidth)return scheduleNextScan();
 ocrBusy=true;
 try{
+  // 1) QR first
   const qrVin=tryQrFrame();
   if(qrVin){
     setStatus('QR erkannt: '+qrVin,'good');
     acceptVIN(qrVin,true);
     return;
   }
-  const ctx=canvas.getContext('2d',{willReadFrequently:true});
-  const sx=Math.floor(video.videoWidth*.05),sy=Math.floor(video.videoHeight*.35),sw=Math.floor(video.videoWidth*.90),sh=Math.floor(video.videoHeight*.18);
-  canvas.width=Math.min(1800,Math.max(1200,sw));
-  canvas.height=Math.round(canvas.width*(sh/sw));
-  ctx.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
 
-  const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
-  const variant=scanVariant++%3;
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const sx=Math.floor(vw*.05), sy=Math.floor(vh*.28), sw=Math.floor(vw*.90), sh=Math.floor(vh*.30);
+
+  // Base crop at high resolution
+  const base=document.createElement('canvas');
+  const bctx=base.getContext('2d',{willReadFrequently:true});
+  base.width=Math.min(1800,Math.max(1200,sw));
+  base.height=Math.round(base.width*(sh/sw));
+  bctx.drawImage(video,sx,sy,sw,sh,0,0,base.width,base.height);
+
+  const passes=[];
+
+  // Pass A: original image — best for clean paper
+  passes.push(base);
+
+  // Pass B: grayscale + stronger contrast — useful behind glass
+  const contrast=document.createElement('canvas');
+  contrast.width=base.width; contrast.height=base.height;
+  const cctx=contrast.getContext('2d',{willReadFrequently:true});
+  cctx.drawImage(base,0,0);
+  let img=cctx.getImageData(0,0,contrast.width,contrast.height),d=img.data;
   for(let i=0;i<d.length;i+=4){
-    const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    let v;
-    if(variant===0){
-      v=Math.max(0,Math.min(255,(gray-128)*1.8+128));
-    }else if(variant===1){
-      v=gray>115?255:0;
-    }else{
-      v=gray>175?255:0;
-    }
+    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    const v=Math.max(0,Math.min(255,(g-128)*2.0+128));
     d[i]=d[i+1]=d[i+2]=v;
   }
-  ctx.putImageData(img,0,0);
+  cctx.putImageData(img,0,0);
+  passes.push(contrast);
 
-  const blob=await new Promise(res=>canvas.toBlob(res,'image/jpeg',.95));
-  const cands=await runOCRonBlob(blob);
+  // Pass C: adaptive-ish threshold at medium level
+  const thresh=document.createElement('canvas');
+  thresh.width=base.width; thresh.height=base.height;
+  const tctx=thresh.getContext('2d',{willReadFrequently:true});
+  tctx.drawImage(base,0,0);
+  img=tctx.getImageData(0,0,thresh.width,thresh.height); d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    const v=g>135?255:0;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  tctx.putImageData(img,0,0);
+  passes.push(thresh);
 
-  if(cands.length){
-    const best=cands.find(c=>c.valid)||cands[0];
+  let all=[];
+  for(let i=0;i<passes.length;i++){
+    const blob=await new Promise(res=>passes[i].toBlob(res,'image/jpeg',.96));
+    const cands=await runOCRonBlob(blob);
+    if(cands&&cands.length) all=all.concat(cands);
+    if(all.some(x=>x.valid)) break;
+  }
+
+  if(all.length){
+    const map=new Map();
+    for(const x of all){
+      const prev=map.get(x.vin);
+      if(!prev||x.score>prev.score)map.set(x.vin,x);
+    }
+    const cands=Array.from(map.values()).sort((a,b)=>b.score-a.score);
+    const best=cands.find(x=>x.valid)||cands[0];
+
     if(best.vin===stableCandidate)stableCount+=1;
     else{stableCandidate=best.vin;stableCount=1}
-    setStatus('VIN-Kandidat: '+best.vin+' · Treffer '+stableCount+'/3',best.valid?'good':'');
-    if(best.valid&&stableCount>=2){acceptVIN(best.vin,true);return}
-    if(stableCount>=3){acceptVIN(best.vin,false);return}
+
+    setStatus('VIN-Kandidat: '+best.vin+' · Treffer '+stableCount+'/2',best.valid?'good':'');
+    if(best.valid&&stableCount>=1){acceptVIN(best.vin,true);return}
+    if(stableCount>=2){acceptVIN(best.vin,false);return}
   }else{
-    stableCount=Math.max(0,stableCount-1);
-    setStatus('Suche läuft … QR-Code und VIN möglichst gemeinsam sichtbar halten. iPhone-QR + OCR laufen parallel.');
+    stableCandidate='';
+    stableCount=0;
+    setStatus('Noch keine VIN erkannt – VIN möglichst groß und gerade im grünen Bereich halten.');
   }
 }catch(err){
-  setStatus('Live-Scan konnte das Bild nicht auswerten. Bitte kurz neu ausrichten.','bad')
+  setStatus('Scannerfehler: '+(err&&err.message?err.message:'unbekannt'),'bad');
 }finally{
   ocrBusy=false;
   scheduleNextScan();
 }}
-function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,900)}
+function scheduleNextScan(){if(!scanning)return;scanTimer=setTimeout(scanFrame,1500)}
 async function startScanner(){
 try{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
@@ -274,7 +311,7 @@ try{
 
   scannerWrap.classList.remove('hidden');
   scanning=true;stableCandidate='';stableCount=0;scanVariant=0;
-  setStatus('Scanner aktiv – iPhone-QR-Erkennung läuft direkt im Browser, OCR als Fallback.');
+  setStatus('Multi-Scanner aktiv – QR + normale OCR + Scheiben-OCR laufen parallel.');
   scheduleNextScan()
 }catch(err){
   setStatus('Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.','bad')
